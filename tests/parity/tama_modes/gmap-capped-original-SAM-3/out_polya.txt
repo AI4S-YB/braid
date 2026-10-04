@@ -1,0 +1,2 @@
+cluster_id	trans_id	strand	a_percent	a_count	sequence
+11_c69636/1/797	G4.1	-	75.0	15	AAGGAAAGAGGAAAAAAAAA

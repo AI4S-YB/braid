@@ -1,0 +1,12 @@
+-f
+files.tsv
+-a
+20
+-m
+10
+-z
+10
+-d
+merge_dup
+-e
+longest_ends

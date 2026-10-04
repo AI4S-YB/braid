@@ -1,0 +1,3 @@
+flairiso1-1_ENSG0	S__isoforms..t0_ENSG0
+lowexpiso_ENSG0	S__isoforms..t1_ENSG1
+lowexpiso_ENSG1	S__isoforms..t2_ENSG2

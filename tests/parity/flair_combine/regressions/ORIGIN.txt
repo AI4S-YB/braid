@@ -1,0 +1,6 @@
+Frozen outputs from the local upstream flair_combine.py snapshot,
+SHA-256 e0969f390479e210237458d775a9fdcef8eb8943c34a4bfe8838b9ac652d0636.
+All 12 pre-existing upstream golden cases were regenerated and matched.
+Target upstream revision is recorded in ../UPSTREAM.txt; network provenance
+was not revalidated during this audit. Inputs are minimal audit reproducers.
+Generate using oracle/evaluate_parity.py.

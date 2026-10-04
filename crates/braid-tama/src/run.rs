@@ -1,14 +1,15 @@
-//! Original-mode TAMA collapse.
+//! TAMA collapse, including capped/no_cap and original/low_mem modes.
 //!
-//! `low_mem` and `no_cap` are refused. Variant support is forced back to 5
-//! before the variant files and the report are written, which is what
-//! `tama_collapse.py` does in original mode.
+//! Original mode selects multimaps globally and forces variant support to 5.
+//! Low-memory mode overwrites models within a locus, releases completed loci,
+//! and emits eight files (no variant files), following upstream behavior.
 
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use braid_io::{read_fasta, read_sam, SamClass};
+use braid_io::{alignment_reader, read_fasta, SamClass};
+use braid_model::Transcript;
 
 use crate::group::{collapse_locus, GroupParams, ReadModel};
 use crate::lde::{local_density, LdeRead};
@@ -43,8 +44,37 @@ pub struct CollapseSettings {
     pub prefix_label: String,
 }
 
-#[derive(Clone, Debug)]
+impl Default for CollapseSettings {
+    fn default() -> Self {
+        Self {
+            cap: "capped".into(),
+            ends: "common_ends".into(),
+            coverage: 99.0,
+            identity: 85.0,
+            ident_method: "ident_cov".into(),
+            five_prime: 10,
+            exon_diff: 10,
+            three_prime: 10,
+            duplicates: "merge_dup".into(),
+            sj_priority: "no_priority".into(),
+            sj_threshold: 10,
+            lde: 1000,
+            ses: "_".into(),
+            bam: "SAM".into(),
+            log: "log_on".into(),
+            run_mode: "original".into(),
+            var_support: 5,
+            sam_label: String::new(),
+            fasta_label: String::new(),
+            prefix_label: String::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct CollapseTexts {
+    /// Models in the same order as BED rows, using 1-based internal coordinates.
+    pub transcripts: Vec<Transcript>,
     pub bed: String,
     pub read_txt: String,
     pub trans_report: String,
@@ -57,19 +87,31 @@ pub struct CollapseTexts {
     pub report: String,
 }
 
+/// Collect result texts and models in memory. For bounded-memory file output,
+/// use `collapse_to_files`; both functions accept both run modes.
 pub fn original_collapse(
     sam_path: &Path,
     fasta_path: &Path,
     settings: &CollapseSettings,
 ) -> Result<CollapseTexts, String> {
-    if settings.run_mode != "original" {
-        return Err("only -rm original is ported".to_string());
+    collapse_internal(sam_path, fasta_path, settings, None)
+}
+
+fn collapse_internal(
+    sam_path: &Path,
+    fasta_path: &Path,
+    settings: &CollapseSettings,
+    mut sink: Option<&mut dyn FnMut(&CollapseTexts) -> Result<(), String>>,
+) -> Result<CollapseTexts, String> {
+    let low_mem = settings.run_mode == "low_mem";
+    if !low_mem && settings.run_mode != "original" {
+        return Err("-rm must be original or low_mem".to_string());
     }
-    if settings.bam != "SAM" {
-        return Err("BAM input is not ported".to_string());
+    if settings.bam != "SAM" && settings.bam != "BAM" {
+        return Err("-b must be SAM or BAM".to_string());
     }
-    if settings.cap != "capped" {
-        return Err("only -x capped is ported".to_string());
+    if settings.cap != "capped" && settings.cap != "no_cap" {
+        return Err("-x must be capped or no_cap".to_string());
     }
     if settings.ends != "common_ends" && settings.ends != "longest_ends" {
         return Err(format!("unknown -e value {}", settings.ends));
@@ -95,8 +137,9 @@ pub fn original_collapse(
     for record in fasta {
         genome.insert(record.id, record.seq);
     }
-    let records = read_sam(sam_path)?;
+    let records = alignment_reader(sam_path, settings.bam == "BAM")?;
     let params = GroupParams {
+        capped: settings.cap == "capped",
         five_prime: settings.five_prime,
         exon_diff: settings.exon_diff,
         three_prime: settings.three_prime,
@@ -127,7 +170,45 @@ pub fn original_collapse(
     let mut group_count = 0usize;
     let mut scaffolds = Vec::new();
 
-    for record in &records {
+    let mut gene_count = 0i64;
+    let mut emitted_transcripts = 0i64;
+    let mut transcripts = Vec::new();
+    let mut bed = Vec::new();
+    let mut trans_report = vec![
+        "transcript_id\tnum_clusters\thigh_coverage\tlow_coverage\thigh_quality_percent\tlow_quality_percent\tstart_wobble_list\tend_wobble_list\tcollapse_sj_start_err\tcollapse_sj_end_err\tcollapse_error_nuc"
+            .to_string(),
+    ];
+    let mut trans_read = Vec::new();
+    let mut polya = vec!["cluster_id\ttrans_id\tstrand\ta_percent\ta_count\tsequence".to_string()];
+
+    // Draining diagnostic text every record keeps the file-writing path bounded,
+    // including stretches containing only rejected reads.
+    for record in records {
+        if let Some(emit) = sink.as_mut() {
+            emit(&CollapseTexts {
+                read_txt: join_lines(&read_lines),
+                local_density: join_lines(&lde_lines),
+                strand_check: join_lines(&strand_lines),
+                bed: join_lines(&bed),
+                trans_report: join_lines(&trans_report),
+                trans_read: join_lines(&trans_read),
+                polya: join_lines(&polya),
+                ..CollapseTexts::default()
+            })?;
+            emitted_transcripts += bed.len() as i64;
+            read_lines.clear();
+            lde_lines.clear();
+            strand_lines.clear();
+            bed.clear();
+            trans_report.clear();
+            trans_read.clear();
+            polya.clear();
+            transcripts.clear();
+        }
+        if low_mem {
+            book = VariationBook::new();
+        }
+        let record = record?;
         let mapped = mapped_label(record.class);
         if record.class == SamClass::Forward && record.xs == Some('-') {
             strand_lines.push(format!(
@@ -230,7 +311,7 @@ pub fn original_collapse(
             record.cigar
         ));
         accepted += 1;
-        let polya = detect_polya(strand, sequence, record.pos, coords.end, 20)?;
+        let polya_read = detect_polya(strand, sequence, record.pos, coords.end, 20)?;
         let model = ReadModel {
             cluster_id: record.qname.clone(),
             scaff: record.rname.clone(),
@@ -247,10 +328,43 @@ pub fn original_collapse(
             i_count: rate.i_count,
             d_count: rate.d_count,
             mis_count: rate.mis_count,
-            polya_seq: polya.sequence,
-            a_count: polya.a_count,
-            a_percent: polya.a_percent,
+            polya_seq: polya_read.sequence,
+            a_count: polya_read.a_count,
+            a_percent: polya_read.a_percent,
         };
+        if low_mem {
+            let boundary = this_scaffold
+                .as_deref()
+                .is_some_and(|scaff| scaff != record.rname || record.pos > group_end);
+            if boundary {
+                // Upstream low_mem inserts then removes the incoming read before
+                // processing the preceding locus. Preserve duplicate-ID behavior.
+                models.remove(&record.qname);
+                let ids = groups.get(&0).ok_or("missing low_mem locus")?;
+                let (next, genes) = collapse_locus(ids, &models, &params, gene_count)?;
+                gene_count = next;
+                for gene in genes {
+                    transcripts.extend(gene.transcripts);
+                    bed.extend(gene.bed);
+                    trans_report.extend(gene.trans_report);
+                    trans_read.extend(gene.trans_read);
+                    polya.extend(gene.polya);
+                }
+                models.clear();
+                groups.clear();
+            }
+            if this_scaffold.is_none() || boundary {
+                this_scaffold = Some(record.rname.clone());
+                group_start = record.pos;
+                group_end = model.end_pos;
+            } else if record.pos < group_start {
+                return Err(format!("Sam file not sorted! {}", record.qname));
+            }
+            group_end = group_end.max(model.end_pos);
+            groups.entry(0).or_default().push(record.qname.clone());
+            models.insert(record.qname.clone(), model);
+            continue;
+        }
         if models.contains_key(&record.qname) {
             let old = &models[&record.qname];
             let old_cov = coverage_percent(old.seq_length, old.h_count, old.s_count);
@@ -323,14 +437,6 @@ pub fn original_collapse(
         return Err("no groups found".to_string());
     }
 
-    let mut gene_count = 0i64;
-    let mut bed = Vec::new();
-    let mut trans_report = vec![
-        "transcript_id\tnum_clusters\thigh_coverage\tlow_coverage\thigh_quality_percent\tlow_quality_percent\tstart_wobble_list\tend_wobble_list\tcollapse_sj_start_err\tcollapse_sj_end_err\tcollapse_error_nuc"
-            .to_string(),
-    ];
-    let mut trans_read = Vec::new();
-    let mut polya = vec!["cluster_id\ttrans_id\tstrand\ta_percent\ta_count\tsequence".to_string()];
     for index in 0..=group_count {
         let Some(ids) = groups.get(&index).cloned() else {
             continue;
@@ -343,6 +449,7 @@ pub fn original_collapse(
         let (next, genes) = collapse_locus(&ids, &models, &params, gene_count)?;
         gene_count = next;
         for gene in genes {
+            transcripts.extend(gene.transcripts);
             bed.extend(gene.bed);
             trans_report.extend(gene.trans_report);
             trans_read.extend(gene.trans_read);
@@ -350,9 +457,20 @@ pub fn original_collapse(
         }
     }
 
-    let (variants, varcov) = write_variants(&book, &genome, &scaffolds)?;
-    let report = report_text(settings, gene_count, bed.len() as i64, accepted, discarded);
-    Ok(CollapseTexts {
+    let (variants, varcov) = if low_mem {
+        (String::new(), String::new())
+    } else {
+        write_variants(&book, &genome, &scaffolds)?
+    };
+    let report = report_text(
+        settings,
+        gene_count,
+        emitted_transcripts + bed.len() as i64,
+        accepted,
+        discarded,
+    );
+    let texts = CollapseTexts {
+        transcripts,
         bed: join_lines(&bed),
         read_txt: join_lines(&read_lines),
         trans_report: join_lines(&trans_report),
@@ -363,7 +481,11 @@ pub fn original_collapse(
         variants,
         varcov,
         report,
-    })
+    };
+    if let Some(emit) = sink {
+        emit(&texts)?;
+    }
+    Ok(texts)
 }
 
 fn coords_end_of(model: &ReadModel) -> i64 {
@@ -521,7 +643,7 @@ fn report_text(
     discarded: i64,
 ) -> String {
     let params = format!(
-        "-s {} -f {} -p {} -x {} -e {} -c {} -i {} -icm {} -a {} -m {} -z {} -d {} -sj {} -sjt {} -lde {} -ses {} -b {} -log {} -rm {} -vc 5",
+        "-s {} -f {} -p {} -x {} -e {} -c {} -i {} -icm {} -a {} -m {} -z {} -d {} -sj {} -sjt {} -lde {} -ses {} -b {} -log {} -rm {} -vc {}",
         settings.sam_label,
         settings.fasta_label,
         settings.prefix_label,
@@ -540,7 +662,8 @@ fn report_text(
         settings.ses,
         settings.bam,
         settings.log,
-        settings.run_mode
+        settings.run_mode,
+        if settings.run_mode == "original" { 5 } else { settings.var_support }
     );
     format!(
         "TAMA Collapse has run successfully!\nParameters used:\t{params}\nTotal Gene Count:\t{genes}\nTotal Transcript Count:\t{transcripts}\nTotal Accepted Reads:\t{accepted}\nTotal Discarded Reads:\t{discarded}\n"
@@ -578,6 +701,9 @@ pub fn write_collapse_texts(prefix: &Path, texts: &CollapseTexts) -> Result<(), 
         ("_report.txt", &texts.report),
     ];
     for (suffix, body) in files {
+        if (suffix == "_variants.txt" || suffix == "_varcov.txt") && body.is_empty() {
+            continue;
+        }
         let path = suffix_path(prefix, suffix);
         fs::write(&path, body).map_err(|err| format!("write {}: {err}", path.display()))?;
     }
@@ -588,6 +714,61 @@ fn suffix_path(prefix: &Path, suffix: &str) -> PathBuf {
     let mut name = prefix.as_os_str().to_os_string();
     name.push(suffix);
     PathBuf::from(name)
+}
+
+/// Write incrementally. low_mem retains only the current locus and genome.
+pub fn collapse_to_files(
+    sam: &Path,
+    fasta: &Path,
+    prefix: &Path,
+    settings: &CollapseSettings,
+) -> Result<(), String> {
+    use std::io::{BufWriter, Write};
+    let mut files = Vec::new();
+    for suffix in [
+        ".bed",
+        "_read.txt",
+        "_trans_report.txt",
+        "_trans_read.bed",
+        "_polya.txt",
+        "_strand_check.txt",
+        "_local_density_error.txt",
+        "_variants.txt",
+        "_varcov.txt",
+        "_report.txt",
+    ] {
+        if settings.run_mode == "low_mem" && (suffix == "_variants.txt" || suffix == "_varcov.txt")
+        {
+            continue;
+        }
+        let path = suffix_path(prefix, suffix);
+        let f = fs::File::create(&path).map_err(|e| format!("create {}: {e}", path.display()))?;
+        files.push((suffix, BufWriter::new(f)));
+    }
+    let mut emit = |texts: &CollapseTexts| -> Result<(), String> {
+        for (suffix, f) in &mut files {
+            let body = match *suffix {
+                ".bed" => &texts.bed,
+                "_read.txt" => &texts.read_txt,
+                "_trans_report.txt" => &texts.trans_report,
+                "_trans_read.bed" => &texts.trans_read,
+                "_polya.txt" => &texts.polya,
+                "_strand_check.txt" => &texts.strand_check,
+                "_local_density_error.txt" => &texts.local_density,
+                "_variants.txt" => &texts.variants,
+                "_varcov.txt" => &texts.varcov,
+                _ => &texts.report,
+            };
+            f.write_all(body.as_bytes())
+                .map_err(|e| format!("write {suffix}: {e}"))?;
+        }
+        Ok(())
+    };
+    collapse_internal(sam, fasta, settings, Some(&mut emit))?;
+    for (suffix, f) in &mut files {
+        f.flush().map_err(|e| format!("flush {suffix}: {e}"))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

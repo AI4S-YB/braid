@@ -1,0 +1,16 @@
+TAMA source commit: 2fa3c308282190c413e9bf0e0b49e63086eef7d4
+{
+  "collapse": "7e04fd665aee9f26e9e3901b9acb55e466fbac05936ca8e63aa587b48f423855",
+  "merge": "150f2a6fffeba6826cea720cd564b3c957704c1391a7d39caecacadaf7477f41"
+}
+
+Golden outputs generated from the local original scripts through the development-only
+Python 2 semantic adapter (oracle/python2_compat.py); CPython 2 and Docker were
+unavailable. Adapter baseline matched all existing Python 2 gmap data goldens.
+This is source-derived differential evidence, not a fresh native CPython 2 run.
+Production braid runs these algorithms in Rust; only BAM decoding needs samtools.
+Console output and process exit codes of upstream sys.exit() error paths are not golden.
+Report input and output paths are represented by @SAM@, @FASTA@ and @PREFIX@.
+Regenerate the broader matrix with oracle/evaluate_tama.py, preferably --python2.
+merge-071 and merge-116 exercise duplicate-group recollapse; random-collapse-010
+and random-collapse-015 preserve the upstream low_mem duplicate-ID rejection.

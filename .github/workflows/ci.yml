@@ -23,7 +23,13 @@ jobs:
         with:
           toolchain: 1.96.1
       - uses: Swatinem/rust-cache@v2
+      - name: Install BAM decoder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y samtools
       - name: Test
+        env:
+          BRAID_REQUIRE_SAMTOOLS: "1"
         run: cargo test --workspace --locked
 
   build:
@@ -111,7 +117,8 @@ jobs:
           - Linux x86_64（glibc）：\`braid-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz\`，解压后是 \`braid\`
           - Windows x86_64（MSVC）：\`braid-${GITHUB_REF_NAME}-x86_64-pc-windows-msvc.zip\`，解压后是 \`braid.exe\`
 
-          本版包含 TAMA collapse（original capped 模式）和 FLAIR combine。许可证 GPL-3.0-only。
+          本版包含 TAMA collapse、TAMA merge 和 FLAIR combine。许可证 GPL-3.0-only。
+          TAMA collapse 支持 capped/no_cap、original/low_mem 和 SAM/BAM；读取 BAM 需要在 PATH 中安装 samtools。
           Linux 包在 GitHub 的 Ubuntu 运行器上编译，需要与该系统相近的 glibc。
           EOF
           gh release create "${GITHUB_REF_NAME}" ./* \

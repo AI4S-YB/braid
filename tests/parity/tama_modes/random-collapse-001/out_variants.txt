@@ -1,0 +1,1 @@
+scaffold	position	type	ref_allele	alt_allele	count	cov_count	cluster_list

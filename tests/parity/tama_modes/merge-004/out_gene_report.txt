@@ -1,0 +1,7 @@
+gene_id	num_clusters	num_final_trans	sources	chrom	start	end	source_genes	source_summary
+G1	6	3	S0,S1,S2	chr1	100	620	S0_G0,S1_G0,S2_G0	S0:1,S1:1,S2:1
+G2	7	5	S0,S1,S2	chr1	100	610	S0_G0,S1_G0,S2_G0	S0:1,S1:1,S2:1
+G3	15	10	S0,S1,S2	chr1	3100	3620	S0_G1,S1_G1,S2_G1	S0:1,S1:1,S2:1
+G4	3	1	S1,S2	chr1	3100	3420	S1_G1,S2_G1	S1:1,S2:1
+G5	5	4	S0,S1	chr1	6100	6602	S0_G2,S1_G2	S0:1,S1:1
+G6	12	8	S0,S1,S2	chr1	6100	6610	S0_G2,S1_G2,S2_G2	S0:1,S1:1,S2:1

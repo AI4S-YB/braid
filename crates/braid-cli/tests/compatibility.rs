@@ -1,0 +1,355 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+struct WorkDir(PathBuf);
+
+impl WorkDir {
+    fn new() -> Self {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "braid-cli-compat-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&path).unwrap();
+        Self(path)
+    }
+}
+
+impl Drop for WorkDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn parity() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/parity")
+}
+
+fn run(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_braid"))
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn tama_legacy_and_long_flags_write_all_oracle_outputs() {
+    let golden = parity().join("gmap_collapse");
+    for command in ["tama-collapse", "collapse"] {
+        for dash in ["-", "--"] {
+            let dir = WorkDir::new();
+            let prefix = dir.0.join("gmap");
+            let sam = golden.join("gmap_test.sam");
+            let fasta = golden.join("test_genome.fa");
+            let mut cmd = Command::new(env!("CARGO_BIN_EXE_braid"));
+            cmd.arg(command)
+                .arg("-s")
+                .arg(&sam)
+                .arg("-f")
+                .arg(&fasta)
+                .arg("-p")
+                .arg(&prefix);
+            for (key, value) in [
+                ("icm", "ident_cov"),
+                ("sj", "no_priority"),
+                ("sjt", "10"),
+                ("lde", "1000"),
+                ("ses", "_"),
+                ("log", "log_off"),
+                ("rm", "original"),
+                ("vc", "9"),
+            ] {
+                cmd.arg(format!("{dash}{key}")).arg(value);
+            }
+            let output = cmd.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{command} {dash}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 10);
+            for suffix in [
+                ".bed",
+                "_read.txt",
+                "_trans_report.txt",
+                "_trans_read.bed",
+                "_polya.txt",
+                "_strand_check.txt",
+                "_local_density_error.txt",
+                "_variants.txt",
+                "_varcov.txt",
+                "_report.txt",
+            ] {
+                let expected = fs::read_to_string(golden.join(format!("gmap{suffix}")))
+                    .unwrap()
+                    .replace("test_files/gmap_test.sam", &sam.display().to_string())
+                    .replace("test_files/test_genome.fa", &fasta.display().to_string())
+                    .replace(
+                        "/work/braid/tests/parity/gmap_collapse/gmap",
+                        &prefix.display().to_string(),
+                    );
+                let actual = fs::read_to_string(dir.0.join(format!("gmap{suffix}"))).unwrap();
+                assert_eq!(actual, expected, "{command} {dash}: {suffix}");
+            }
+        }
+    }
+}
+
+#[test]
+fn tama_version_does_not_require_input_files() {
+    for command in ["tama-collapse", "collapse"] {
+        let output = run(&[command, "-v", "1"]);
+        assert!(output.status.success());
+        let stdout = String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\r\n", "\n");
+        assert_eq!(stdout, "tc_version_date_2023_03_28\nProgram did not run\n");
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn tama_execution_still_requires_inputs() {
+    for args in [
+        vec!["tama-collapse"],
+        vec!["tama-collapse", "-s", "missing.sam"],
+    ] {
+        let output = run(&args);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("required arguments"));
+    }
+}
+
+#[test]
+fn merge_is_available_and_legacy_cds_reaches_input_validation() {
+    let output = run(&[
+        "tama-merge",
+        "-f",
+        "unused",
+        "-p",
+        "unused",
+        "-cds",
+        "source",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("read unused"));
+    let output = run(&["--help"]);
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(!help.contains("not implemented"));
+    assert!(help.contains("  tama-merge"));
+    assert!(help.contains("  merge "));
+}
+
+#[test]
+fn flair_cli_writes_filtered_chain_regression_outputs() {
+    let golden = parity().join("flair_combine/regressions/consecutive-filtered-chains");
+    let dir = WorkDir::new();
+    let manifest = dir.0.join("manifest.tsv");
+    fs::write(
+        &manifest,
+        format!(
+            "S\tisoforms\t{}\t\t{}\n",
+            golden.join("in.bed").display(),
+            golden.join("in.map").display()
+        ),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_braid"))
+        .arg("flair-combine")
+        .arg("-m")
+        .arg(manifest)
+        .arg("-o")
+        .arg(dir.0.join("combined"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 4);
+    for suffix in [".bed", ".counts.tsv", ".isoform.map.txt"] {
+        assert_eq!(
+            fs::read(dir.0.join(format!("combined{suffix}"))).unwrap(),
+            fs::read(golden.join(format!("combined{suffix}"))).unwrap()
+        );
+    }
+}
+
+fn fixture_args(case: &Path, dir: &Path, kind: &str, bam: bool) -> Vec<String> {
+    let mut args: Vec<String> = fs::read_to_string(case.join("args.txt"))
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    if kind == "merge" {
+        let manifest = fs::read_to_string(case.join("files.tsv"))
+            .unwrap()
+            .lines()
+            .map(|line| {
+                let (path, rest) = line.split_once('\t').unwrap();
+                format!("{}\t{rest}\n", case.join(path).display())
+            })
+            .collect::<String>();
+        let path = dir.join("files.tsv");
+        fs::write(&path, manifest).unwrap();
+        let index = args.iter().position(|s| s == "-f").unwrap();
+        args[index + 1] = path.display().to_string();
+    } else {
+        for flag in ["-s", "-f"] {
+            let index = args.iter().position(|s| s == flag).unwrap();
+            args[index + 1] = if bam && flag == "-s" {
+                case.parent()
+                    .unwrap()
+                    .join("gmap.bam")
+                    .display()
+                    .to_string()
+            } else {
+                case.join(&args[index + 1]).display().to_string()
+            };
+        }
+        if bam {
+            let index = args.iter().position(|s| s == "-b").unwrap();
+            args[index + 1] = "BAM".into();
+        }
+    }
+    args.extend(["-p".into(), dir.join("out").display().to_string()]);
+    args
+}
+
+fn check_fixture(name: &str, kind: &str, success: bool, bam: bool) {
+    let case = parity().join("tama_modes").join(name);
+    let dir = WorkDir::new();
+    let args = fixture_args(&case, &dir.0, kind, bam);
+    let output = Command::new(env!("CARGO_BIN_EXE_braid"))
+        .arg(format!("tama-{kind}"))
+        .args(&args)
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.success(),
+        success,
+        "{name} bam={bam}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    if !success {
+        return;
+    }
+    let value = |flag: &str| &args[args.iter().position(|s| s == flag).unwrap() + 1];
+    let mut expected_names = std::collections::BTreeSet::new();
+    for file in fs::read_dir(&case).unwrap() {
+        let file = file.unwrap();
+        let name = file.file_name();
+        if !name.to_string_lossy().starts_with("out") {
+            continue;
+        }
+        expected_names.insert(name.clone());
+        let mut expected = fs::read_to_string(file.path()).unwrap();
+        if kind == "collapse" {
+            expected = expected
+                .replace("@SAM@", value("-s"))
+                .replace("@FASTA@", value("-f"))
+                .replace("@PREFIX@", value("-p"));
+            if bam {
+                expected = expected.replace("-b SAM", "-b BAM");
+            }
+        }
+        let actual = fs::read_to_string(dir.0.join(&name)).unwrap();
+        assert_eq!(actual, expected, "{name:?} in {} bam={bam}", case.display());
+    }
+    let actual_names: std::collections::BTreeSet<_> = fs::read_dir(&dir.0)
+        .unwrap()
+        .map(|f| f.unwrap().file_name())
+        .filter(|s| s.to_string_lossy().starts_with("out"))
+        .collect();
+    assert_eq!(actual_names, expected_names);
+}
+
+#[test]
+fn tama_modes_match_source_derived_goldens() {
+    let index = fs::read_to_string(parity().join("tama_modes/cases.tsv")).unwrap();
+    for line in index.lines() {
+        let fields: Vec<_> = line.split('\t').collect();
+        check_fixture(fields[0], fields[1], fields[2] == "match", false);
+    }
+}
+
+fn have_samtools() -> bool {
+    let available = Command::new("samtools")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    assert!(
+        available || std::env::var_os("BRAID_REQUIRE_SAMTOOLS").is_none(),
+        "CI requires samtools for BAM tests"
+    );
+    if !available {
+        eprintln!("BAM integration tests skipped: install samtools or set BRAID_REQUIRE_SAMTOOLS=1 to require it");
+    }
+    available
+}
+
+#[test]
+fn actual_bam_matches_sam_in_all_collapse_modes() {
+    if !have_samtools() {
+        return;
+    }
+    for cap in ["capped", "no_cap"] {
+        for mode in ["original", "low_mem"] {
+            for variant in 0..4 {
+                check_fixture(
+                    &format!("gmap-{cap}-{mode}-SAM-{variant}"),
+                    "collapse",
+                    true,
+                    true,
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn truncated_bam_is_not_reported_as_success() {
+    if !have_samtools() {
+        return;
+    }
+    let dir = WorkDir::new();
+    let bam = dir.0.join("broken.bam");
+    fs::write(&bam, b"BAM\x01not a valid BAM file").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_braid"))
+        .arg("tama-collapse")
+        .arg("-s")
+        .arg(bam)
+        .arg("-b")
+        .arg("BAM")
+        .arg("-f")
+        .arg(parity().join("gmap_collapse/test_genome.fa"))
+        .arg("-p")
+        .arg(dir.0.join("out"))
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("samtools view"));
+    assert!(!fs::read_to_string(dir.0.join("out_report.txt"))
+        .unwrap()
+        .contains("successfully"));
+}
+
+#[test]
+fn merge_default_rejects_duplicate_groups() {
+    let case = parity().join("tama_modes/merge-071");
+    let dir = WorkDir::new();
+    let mut args = fixture_args(&case, &dir.0, "merge", false);
+    let index = args.iter().position(|s| s == "-d").unwrap();
+    args.drain(index..index + 2);
+    let output = Command::new(env!("CARGO_BIN_EXE_braid"))
+        .arg("merge")
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("duplicate merged models"));
+}

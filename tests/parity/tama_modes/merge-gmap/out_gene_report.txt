@@ -1,0 +1,6 @@
+gene_id	num_clusters	num_final_trans	sources	chrom	start	end	source_genes	source_summary
+G1	8	8	testmerge	AADN04001032.1	899	3163	testmerge_G1	testmerge:1
+G2	20	15	testmerge	AADN04001032.1	3200	5411	testmerge_G2	testmerge:1
+G3	1	1	testmerge	AADN04001032.1	8662	12814	testmerge_G3	testmerge:1
+G4	2	2	testmerge	AADN04001032.1	12840	13956	testmerge_G4	testmerge:1
+G5	1	1	testmerge	AADN04001032.1	13002	13313	testmerge_G5	testmerge:1

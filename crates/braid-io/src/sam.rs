@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
+use std::process::{Child, Command, Stdio};
 
 /// Classes TAMA actually accepts. Any other flag is an error, matching the
 /// `sam_flag_dict` lookup. This is not a SAM bitfield decoder.
@@ -73,20 +74,98 @@ pub fn parse_sam_line(line: &str) -> Result<SamRecord, String> {
 }
 
 pub fn read_sam(path: &Path) -> Result<Vec<SamRecord>, String> {
-    let file = File::open(path).map_err(|err| format!("open {}: {err}", path.display()))?;
-    let reader = BufReader::new(file);
-    let mut records = Vec::new();
-    for (lineno, line) in reader.lines().enumerate() {
-        let line = line.map_err(|err| format!("read {}:{}: {err}", path.display(), lineno + 1))?;
-        if line.is_empty() || line.starts_with('@') {
-            continue;
+    alignment_reader(path, false)?.collect()
+}
+
+/// Streaming SAM records; BAM is decoded by samtools, as in upstream TAMA.
+pub struct AlignmentReader {
+    reader: Box<dyn BufRead>,
+    child: Option<Child>,
+    label: String,
+    lineno: usize,
+    finished: bool,
+}
+
+pub fn alignment_reader(path: &Path, bam: bool) -> Result<AlignmentReader, String> {
+    let (reader, child): (Box<dyn BufRead>, Option<Child>) = if bam {
+        let mut child = Command::new("samtools")
+            .arg("view")
+            .arg("--")
+            .arg(path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|e| format!("BAM input requires samtools on PATH: {e}"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or("samtools stdout is unavailable")?;
+        (Box::new(BufReader::new(stdout)), Some(child))
+    } else {
+        let file = File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
+        (Box::new(BufReader::new(file)), None)
+    };
+    Ok(AlignmentReader {
+        reader,
+        child,
+        label: path.display().to_string(),
+        lineno: 0,
+        finished: false,
+    })
+}
+
+impl Iterator for AlignmentReader {
+    type Item = Result<SamRecord, String>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
         }
-        records.push(
-            parse_sam_line(&line)
-                .map_err(|err| format!("{}:{}: {err}", path.display(), lineno + 1))?,
-        );
+        loop {
+            let mut line = String::new();
+            match self.reader.read_line(&mut line) {
+                Ok(0) => {
+                    self.finished = true;
+                    if let Some(mut child) = self.child.take() {
+                        match child.wait() {
+                            Ok(status) if status.success() => {}
+                            Ok(status) => {
+                                return Some(Err(format!(
+                                    "samtools view {} failed: {status}",
+                                    self.label
+                                )))
+                            }
+                            Err(e) => return Some(Err(format!("waiting for samtools: {e}"))),
+                        }
+                    }
+                    return None;
+                }
+                Ok(_) => {
+                    self.lineno += 1;
+                    let line = line.trim_end_matches(['\r', '\n']);
+                    if line.is_empty() || line.starts_with('@') {
+                        continue;
+                    }
+                    return Some(
+                        parse_sam_line(line)
+                            .map_err(|e| format!("{}:{}: {e}", self.label, self.lineno)),
+                    );
+                }
+                Err(e) => {
+                    self.finished = true;
+                    return Some(Err(format!("read {}: {e}", self.label)));
+                }
+            }
+        }
     }
-    Ok(records)
+}
+
+impl Drop for AlignmentReader {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
 }
 
 #[cfg(test)]

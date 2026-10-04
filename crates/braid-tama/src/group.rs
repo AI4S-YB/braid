@@ -1,11 +1,13 @@
-//! Capped gene grouping, collapse voting, and transcript sort from
+//! Capped and no-cap gene grouping, collapse voting, and transcript sort from
 //! `tama_collapse.py`.
 //!
-//! Hunter ids are sorted as strings. Prey walks, gene membership, merged-read
+//! Capped hunter ids are sorted as strings; no-cap hunters start with the
+//! longest 5' end at each exon-count level. Prey walks, gene membership, merged-read
 //! walks, and splice-error joins follow `Py27Dict` (CPython 2.7, seed 0).
 //! A coordinate vote is the highest count, then the extreme end: smallest
 //! start, largest end. That choice does not depend on coordinate-key order.
 
+use braid_model::{Exon, Strand, Transcript};
 use std::collections::{BTreeMap, HashMap};
 
 use crate::py27::Py27Dict;
@@ -59,6 +61,7 @@ impl ReadModel {
 
 #[derive(Clone, Debug)]
 pub(crate) struct GroupParams {
+    pub capped: bool,
     pub five_prime: i64,
     pub exon_diff: i64,
     pub three_prime: i64,
@@ -327,6 +330,9 @@ fn fuzzy(coord1: i64, coord2: i64, threshold: i64) -> (&'static str, i64) {
 /// Capped comparison. Different exon counts and non-overlapping exons are
 /// different transcripts. `no_cap` is not this path.
 fn same_transcript(a: &ReadModel, b: &ReadModel, params: &GroupParams) -> Result<bool, String> {
+    if !params.capped {
+        return Ok(same_nocap(a, b, params));
+    }
     if a.num_exons() != b.num_exons() {
         return Ok(false);
     }
@@ -509,22 +515,27 @@ fn collapse_transcripts(
                 sj_priority(read, i, this_max, params.sj_priority)?;
             let e_start = py_get(&read.exon_starts, j)?;
             let e_end = py_get(&read.exon_ends, j)?;
-            vote(
-                &mut start_counts,
-                &mut start_errors,
-                &mut start_range,
-                start_pri,
-                e_start,
-                start_err,
-            );
-            vote(
-                &mut end_counts,
-                &mut end_errors,
-                &mut end_range,
-                end_pri,
-                e_end,
-                end_err,
-            );
+            let truncated_five = !params.capped && i + 1 == this_max && i + 1 < max_exon_num;
+            if !(truncated_five && strand == "+") {
+                vote(
+                    &mut start_counts,
+                    &mut start_errors,
+                    &mut start_range,
+                    start_pri,
+                    e_start,
+                    start_err,
+                );
+            }
+            if !(truncated_five && strand == "-") {
+                vote(
+                    &mut end_counts,
+                    &mut end_errors,
+                    &mut end_range,
+                    end_pri,
+                    e_end,
+                    end_err,
+                );
+            }
         }
 
         let best_start_pri = *start_counts
@@ -540,6 +551,13 @@ fn collapse_transcripts(
         let (mut best_start, long_start) = choose_start(start_bucket);
         let (mut best_end, long_end) = choose_end(end_bucket);
 
+        if !params.capped && i + 1 == max_exon_num {
+            if strand == "+" {
+                best_start = long_start;
+            } else {
+                best_end = long_end;
+            }
+        }
         if params.ends == "longest_ends" {
             if i + 1 == max_exon_num {
                 if strand == "+" {
@@ -726,6 +744,41 @@ struct TransGroup {
 }
 
 impl TransGroup {
+    fn add_to(&mut self, a: &str, b: &str) -> Result<(), String> {
+        let groups: Vec<i64> = self
+            .trans_group
+            .get_str(a)
+            .ok_or("missing short transcript")?
+            .iter()
+            .map(|(g, _)| *g)
+            .collect();
+        if groups.len() == 1
+            && self
+                .group_trans
+                .get(&groups[0])
+                .is_some_and(|g| g.len() == 1)
+        {
+            self.group_trans.remove(&groups[0]);
+            self.trans_group.remove(&a.to_string());
+        }
+        let dest: Vec<i64> = self
+            .trans_group
+            .get_str(b)
+            .ok_or("missing long transcript")?
+            .iter()
+            .map(|(g, _)| *g)
+            .collect();
+        for g in dest {
+            self.trans_group
+                .or_insert_with(a.to_string(), Py27Dict::new)
+                .insert(g, 1);
+            self.group_trans
+                .get_mut(&g)
+                .ok_or("missing destination group")?
+                .insert(a.to_string(), 1);
+        }
+        Ok(())
+    }
     fn new() -> Self {
         Self {
             group_count: 0,
@@ -892,13 +945,159 @@ fn simplify_capped(
     Ok(groups.group_trans)
 }
 
+fn same_nocap(a: &ReadModel, b: &ReadModel, p: &GroupParams) -> bool {
+    let na = a.num_exons();
+    let nb = b.num_exons();
+    let n = na.min(nb);
+    for i in 0..n {
+        let ia = if a.strand == "+" { na - i - 1 } else { i };
+        let ib = if a.strand == "+" { nb - i - 1 } else { i };
+        let (sa, ea) = (a.exon_starts[ia], a.exon_ends[ia]);
+        let (sb, eb) = (b.exon_starts[ib], b.exon_ends[ib]);
+        if sa >= eb || sb >= ea {
+            return false;
+        }
+        let st = if a.strand == "-" && i == 0 {
+            p.three_prime
+        } else if a.strand == "+" && na == nb && i + 1 == n {
+            p.five_prime
+        } else {
+            p.exon_diff
+        };
+        let et = if a.strand == "+" && i == 0 {
+            p.three_prime
+        } else if a.strand == "-" && na == nb && i + 1 == n {
+            p.five_prime
+        } else {
+            p.exon_diff
+        };
+        let sm = (sa - sb).abs() <= st;
+        let em = (ea - eb).abs() <= et;
+        if i + 1 == n {
+            if a.strand == "+" {
+                if !em {
+                    return false;
+                }
+                if !sm && na != nb && !((na < nb && sa > sb) || (nb < na && sb > sa)) {
+                    return false;
+                }
+            } else {
+                if !sm {
+                    return false;
+                }
+                if !em && na != nb && !((na < nb && ea < eb) || (nb < na && eb < ea)) {
+                    return false;
+                }
+            }
+        } else if !sm || !em {
+            return false;
+        }
+    }
+    true
+}
+
+fn reinsert_ids(ids: &Py27Dict<String, i32>) -> Py27Dict<String, i32> {
+    let mut out = Py27Dict::new();
+    for (id, _) in ids.iter() {
+        out.insert(id.clone(), 1);
+    }
+    out
+}
+
+fn simplify_nocap(
+    reads: &[ReadModel],
+    p: &GroupParams,
+) -> Result<Py27Dict<i64, Py27Dict<String, i32>>, String> {
+    let lookup: HashMap<&str, &ReadModel> =
+        reads.iter().map(|r| (r.cluster_id.as_str(), r)).collect();
+    let mut levels: BTreeMap<usize, Py27Dict<String, i32>> = BTreeMap::new();
+    for r in reads {
+        levels
+            .entry(r.num_exons())
+            .or_default()
+            .insert(r.cluster_id.clone(), 1);
+    }
+    let mut groups = TransGroup::new();
+    let mut degraded = std::collections::HashSet::new();
+    let mut pending: Py27Dict<String, i32> = Py27Dict::new();
+    for (&level, ids) in levels.iter().rev() {
+        let mut ungrouped = reinsert_ids(ids);
+        while !ungrouped.is_empty() {
+            let mut by_five: BTreeMap<i64, Py27Dict<String, i32>> = BTreeMap::new();
+            for (id, _) in ungrouped.iter() {
+                let r = lookup[id.as_str()];
+                let coord = if r.strand == "+" {
+                    r.start_pos
+                } else {
+                    -r.end_pos
+                };
+                by_five.entry(coord).or_default().insert(id.clone(), 1);
+            }
+            let mut hunter = by_five
+                .first_key_value()
+                .unwrap()
+                .1
+                .iter()
+                .next()
+                .unwrap()
+                .0
+                .clone();
+            ungrouped.remove(&hunter);
+            loop {
+                if !groups.has_trans(&hunter) {
+                    groups.new_group(&hunter)?;
+                }
+                let h = lookup[hunter.as_str()];
+                if !degraded.contains(&hunter) {
+                    for (prey, _) in ungrouped.iter() {
+                        if prey == &hunter {
+                            continue;
+                        }
+                        if !groups.has_trans(prey) {
+                            groups.new_group(prey)?;
+                        }
+                        if !groups.same_group(&hunter, prey)
+                            && same_nocap(h, lookup[prey.as_str()], p)
+                        {
+                            groups.add_to(prey, &hunter)?;
+                            pending.insert(prey.clone(), 1);
+                        }
+                    }
+                }
+                for (_, smaller) in levels.range(..level).rev() {
+                    let candidates = reinsert_ids(smaller);
+                    for (prey, _) in candidates.iter() {
+                        if !groups.has_trans(prey) {
+                            groups.new_group(prey)?;
+                        }
+                        if !groups.same_group(&hunter, prey)
+                            && same_nocap(h, lookup[prey.as_str()], p)
+                        {
+                            groups.add_to(prey, &hunter)?;
+                            degraded.insert(prey.clone());
+                        }
+                    }
+                }
+                let mut queued = string_keys(&pending);
+                queued.sort();
+                let Some(next) = queued.first() else {
+                    break;
+                };
+                hunter = next.clone();
+                pending.remove(&hunter);
+            }
+        }
+    }
+    Ok(groups.group_trans)
+}
+
 fn string_keys_unit(dict: &Py27Dict<String, i32>) -> Vec<String> {
     dict.iter().map(|(key, _)| key.clone()).collect()
 }
 
 /// Group one strand. Returned transcript ids under each start are in the
 /// dict order `process_loci` later walks.
-fn gene_group(
+pub(crate) fn gene_group(
     trans_ids: &[String],
     reads: &HashMap<String, ReadModel>,
 ) -> Result<(Py27Dict<i64, Py27Dict<String, i32>>, Vec<i64>), String> {
@@ -1115,7 +1314,7 @@ fn sort_transcripts(models: Vec<Merged>, params: &GroupParams) -> Result<Vec<Mer
     Ok(sorted)
 }
 
-fn sort_position_keys(keys: &[String]) -> Result<Vec<String>, String> {
+pub(crate) fn sort_position_keys(keys: &[String]) -> Result<Vec<String>, String> {
     let width = keys
         .iter()
         .map(|key| key.split(',').count())
@@ -1185,6 +1384,7 @@ fn iterate_sort(rows: &mut [(String, Vec<Tok>)], col: usize) -> Result<(), Strin
 }
 
 pub(crate) struct WrittenGene {
+    pub transcripts: Vec<Transcript>,
     pub bed: Vec<String>,
     pub trans_report: Vec<String>,
     pub trans_read: Vec<String>,
@@ -1258,7 +1458,11 @@ fn collapse_gene(
     params: &GroupParams,
     gene_count: i64,
 ) -> Result<WrittenGene, String> {
-    let groups = simplify_capped(reads, params)?;
+    let groups = if params.capped {
+        simplify_capped(reads, params)?
+    } else {
+        simplify_nocap(reads, params)?
+    };
     let mut merged_models = Vec::new();
     let mut tmp_count = 0i64;
     for (_, members) in groups.iter() {
@@ -1283,6 +1487,7 @@ fn collapse_gene(
         merged_models.push(merged);
     }
     let sorted = sort_transcripts(merged_models, params)?;
+    let mut transcripts = Vec::new();
     let mut bed = Vec::new();
     let mut trans_report = Vec::new();
     let mut trans_read = Vec::new();
@@ -1292,6 +1497,26 @@ fn collapse_gene(
         let mut merged = merged;
         merged.trans_id = final_id.clone();
         bed.push(merged.bed_line()?);
+        transcripts.push(Transcript {
+            chrom: merged.scaff.clone(),
+            strand: if merged.strand == "+" {
+                Strand::Forward
+            } else {
+                Strand::Reverse
+            },
+            exons: merged
+                .collapse_starts
+                .iter()
+                .zip(&merged.collapse_ends)
+                .map(|(&start, &end)| Exon { start, end })
+                .collect(),
+            gene_id: format!("G{gene_count}"),
+            transcript_id: final_id.clone(),
+            source: None,
+            score: None,
+            cds_start: None,
+            cds_end: None,
+        });
         trans_report.push(merged.trans_report_line(&params.ident_method)?);
         for (_, read) in merged.reads.iter() {
             trans_read.push(merged.read_bed_line(read, &final_id)?);
@@ -1310,6 +1535,7 @@ fn collapse_gene(
         }
     }
     Ok(WrittenGene {
+        transcripts,
         bed,
         trans_report,
         trans_read,

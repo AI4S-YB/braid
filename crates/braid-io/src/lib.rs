@@ -8,4 +8,4 @@ mod sam;
 
 pub use bed::tama_bed12;
 pub use fasta::{read_fasta, FastaRecord};
-pub use sam::{read_sam, SamClass, SamRecord};
+pub use sam::{alignment_reader, read_sam, AlignmentReader, SamClass, SamRecord};

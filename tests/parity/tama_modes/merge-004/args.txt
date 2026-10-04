@@ -1,0 +1,16 @@
+-f
+files.tsv
+-a
+0
+-m
+0
+-z
+10
+-d
+merge_dup
+-e
+common_ends
+-s
+S0,S2
+-cds
+S1,S2

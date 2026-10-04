@@ -1,0 +1,2 @@
+gene_id	num_clusters	num_final_trans	sources	chrom	start	end	source_genes	source_summary
+G1	1	1	A	chr1	100	450	A_G1	A:1

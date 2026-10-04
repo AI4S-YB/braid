@@ -1,0 +1,14 @@
+-s
+../../gmap_collapse/gmap_test.sam
+-f
+../../gmap_collapse/test_genome.fa
+-x
+no_cap
+-rm
+low_mem
+-b
+SAM
+-log
+log_off
+-vc
+3

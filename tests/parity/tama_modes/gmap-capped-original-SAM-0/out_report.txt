@@ -1,0 +1,6 @@
+TAMA Collapse has run successfully!
+Parameters used:	-s @SAM@ -f @FASTA@ -p @PREFIX@ -x capped -e common_ends -c 99.0 -i 85.0 -icm ident_cov -a 10 -m 10 -z 10 -d merge_dup -sj no_priority -sjt 10 -lde 1000 -ses _ -b SAM -log log_off -rm original -vc 5
+Total Gene Count:	5
+Total Transcript Count:	32
+Total Accepted Reads:	91
+Total Discarded Reads:	13

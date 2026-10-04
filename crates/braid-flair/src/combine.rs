@@ -5,7 +5,7 @@
 //! `biggestdiff` is initialized to 0 and never assigned again, so the "longest"
 //! end group is the last group whose length is greater than 0.
 //! A chain that fails the filter still names its map entry from `theseisos`
-//! left behind by the previous kept chain.
+//! left behind by the previous chain, including a filtered chain.
 
 use std::collections::HashMap;
 use std::fs;
@@ -92,7 +92,9 @@ struct SampleData {
 pub fn combine(manifest: &Path, settings: &CombineSettings) -> Result<CombineTexts, String> {
     let count_threshold = parse_count_filter(&settings.filter)?;
     let min_usage = settings.min_percent as f64 / 100.0;
-    let samples = load_manifest(manifest, settings.include_single_exon)?;
+    // Upstream ignores every FASTA unless all samples supply one.
+    let generate_fa = samples_have_fasta(manifest)?;
+    let samples = load_manifest(manifest, settings.include_single_exon, generate_fa)?;
     if samples.is_empty() {
         return Err(format!(
             "no samples found in manifest file {}",
@@ -100,8 +102,6 @@ pub fn combine(manifest: &Path, settings: &CombineSettings) -> Result<CombineTex
         ));
     }
     let sample_labels: Vec<String> = samples.iter().map(|s| s.label.clone()).collect();
-    // A fasta path that was present counts even if that file had no sequences.
-    let generate_fa = samples_have_fasta(manifest)?;
 
     let mut chains: Vec<ChainId> = Vec::new();
     let mut chain_isos: HashMap<ChainId, Vec<Iso>> = HashMap::new();
@@ -162,6 +162,7 @@ pub fn combine(manifest: &Path, settings: &CombineSettings) -> Result<CombineTex
             let mut ids = Vec::new();
             for group in &groups {
                 ids.extend(group.members.iter().map(source_id));
+                last_members = Some(group.members.clone());
             }
             push_map(&mut names, &mut isomap, &outname, ids);
             continue;
@@ -328,7 +329,11 @@ fn text_is_blank_row(line: &str) -> bool {
     line.is_empty()
 }
 
-fn load_manifest(manifest: &Path, include_single_exon: bool) -> Result<Vec<SampleData>, String> {
+fn load_manifest(
+    manifest: &Path,
+    include_single_exon: bool,
+    generate_fa: bool,
+) -> Result<Vec<SampleData>, String> {
     let text = read_text(manifest)?;
     let mut samples = Vec::new();
     for raw in text.split_terminator('\n') {
@@ -366,7 +371,7 @@ fn load_manifest(manifest: &Path, include_single_exon: bool) -> Result<Vec<Sampl
                 include_single_exon,
             )?
         };
-        let seqs = if fa_path.is_empty() {
+        let seqs = if !generate_fa {
             HashMap::new()
         } else {
             read_fasta_table(Path::new(fa_path))?
@@ -583,9 +588,8 @@ fn read_fasta_table(path: &Path) -> Result<HashMap<String, String>, String> {
     let mut last: Option<String> = None;
     for raw in text.split_terminator('\n') {
         let line = raw.trim_end_matches('\r');
-        if line.is_empty() {
-            return Err(format!("empty line in fasta {}", path.display()));
-        }
+        // Like upstream, even an empty sequence line replaces the previous
+        // line for this header; FASTA records are not concatenated here.
         if let Some(header) = line.strip_prefix('>') {
             last = Some(py_rstrip(header).to_string());
         } else {
@@ -1388,6 +1392,54 @@ mod tests {
         );
         let err = combine(&manifest, &CombineSettings::default()).unwrap_err();
         assert!(err.contains("UnboundLocalError"), "{err}");
+    }
+
+    #[test]
+    fn consecutive_filtered_chains_match_flair() {
+        let dir = root().join("regressions/consecutive-filtered-chains");
+        let manifest = write_manifest(
+            "consecutive-filtered-chains",
+            &[format!(
+                "S\tisoforms\t{}\t\t{}",
+                dir.join("in.bed").display(),
+                dir.join("in.map").display()
+            )],
+        );
+        let texts = combine(&manifest, &CombineSettings::default()).unwrap();
+        assert_outputs(&texts, &dir, false, false);
+    }
+
+    #[test]
+    fn partial_fasta_manifest_ignores_all_fasta_paths() {
+        let dir = root().join("regressions/mixed-fasta-missing-unused-file");
+        let manifest = write_manifest(
+            "mixed-fasta-missing-unused-file",
+            &[
+                format!(
+                    "A\tisoforms\t{}\t{}",
+                    dir.join("in.bed").display(),
+                    dir.join("absent.fa").display()
+                ),
+                format!("B\tisoforms\t{}", dir.join("in.bed").display()),
+            ],
+        );
+        let texts = combine(&manifest, &CombineSettings::default()).unwrap();
+        assert_outputs(&texts, &dir, false, false);
+    }
+
+    #[test]
+    fn fasta_blank_line_matches_flair() {
+        let dir = root().join("regressions/fasta-blank-line");
+        let manifest = write_manifest(
+            "fasta-blank-line",
+            &[format!(
+                "A\tisoforms\t{}\t{}",
+                dir.join("in.bed").display(),
+                dir.join("in.fa").display()
+            )],
+        );
+        let texts = combine(&manifest, &CombineSettings::default()).unwrap();
+        assert_outputs(&texts, &dir, true, false);
     }
 
     #[test]

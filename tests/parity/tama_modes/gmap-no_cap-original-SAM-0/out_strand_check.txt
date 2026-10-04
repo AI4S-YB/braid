@@ -1,0 +1,1 @@
+read_id	scaff_name	start_pos	cigar	strands

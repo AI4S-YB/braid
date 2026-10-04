@@ -1,10 +1,11 @@
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use braid_flair::{combine, write_combine_texts, CombineSettings};
-use braid_model::{MergeAlgo, MergeInput, MergeSource};
 use braid_tama::{
-    original_collapse, write_collapse_texts, CollapseSettings, TamaMerge, TAMA_COLLAPSE_DATE,
+    collapse_to_files, merge_sources, read_merge_sources, write_merge_texts, CollapseSettings,
+    MergeSettings, TAMA_COLLAPSE_DATE,
 };
 use clap::{Args, Parser, Subcommand};
 
@@ -12,7 +13,8 @@ use clap::{Args, Parser, Subcommand};
 #[command(
     name = "braid",
     version,
-    about = "Reconcile transcript models. TAMA collapse and FLAIR combine are available."
+    about = "Reconcile transcript models with TAMA collapse, TAMA merge and FLAIR combine.",
+    after_help = "TAMA supports capped/no_cap and original/low_mem modes. BAM input requires samtools on PATH. Legacy TAMA single-dash options are accepted; console logs may differ from upstream."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -23,13 +25,13 @@ struct Cli {
 enum Command {
     /// Collapse alignments into transcript models.
     Collapse(CollapseArgs),
-    /// Merge annotation sets into one transcriptome.
+    /// Merge annotation sets with TAMA.
     Merge(MergeArgs),
     /// Combine transcriptomes. FLAIR combine is available.
     Combine(CombineArgs),
-    /// Same flags as tama_collapse.py.
+    /// TAMA collapse with original parameter spellings.
     TamaCollapse(TamaCollapseArgs),
-    /// Same flags as tama_merge.py.
+    /// TAMA merge with original parameter spellings.
     TamaMerge(TamaMergeArgs),
     /// Same flags as `flair combine`.
     FlairCombine(FlairCombineArgs),
@@ -94,15 +96,15 @@ struct FlairCombineArgs {
 #[derive(Args, Debug)]
 struct TamaCollapseArgs {
     /// Sorted SAM file.
-    #[arg(short = 's')]
-    sam: PathBuf,
+    #[arg(short = 's', required_unless_present = "version_date")]
+    sam: Option<PathBuf>,
     /// Genome FASTA.
-    #[arg(short = 'f')]
-    fasta: PathBuf,
+    #[arg(short = 'f', required_unless_present = "version_date")]
+    fasta: Option<PathBuf>,
     /// Output prefix.
-    #[arg(short = 'p')]
-    prefix: PathBuf,
-    /// `capped` or `no_cap`.
+    #[arg(short = 'p', required_unless_present = "version_date")]
+    prefix: Option<PathBuf>,
+    /// `capped` or `no_cap` (allows 5' degradation).
     #[arg(short = 'x', default_value = "capped")]
     cap: String,
     /// `common_ends` or `longest_ends`.
@@ -141,13 +143,13 @@ struct TamaCollapseArgs {
     /// Match symbol in the simple error string. Default `_`.
     #[arg(long = "ses", default_value = "_")]
     ses: String,
-    /// Pass `BAM` to read BAM via samtools, matching `-b`.
+    /// `SAM` or `BAM`. BAM requires samtools on PATH.
     #[arg(short = 'b')]
     bam: Option<String>,
-    /// `log_on` or `log_off`.
+    /// Recorded in the report; upstream console logs are not reproduced.
     #[arg(long = "log", default_value = "log_on")]
     log: String,
-    /// `original` or `low_mem`.
+    /// `original` or `low_mem`. low_mem processes one locus at a time.
     #[arg(long = "rm", default_value = "original")]
     run_mode: String,
     /// Variant support threshold.
@@ -189,8 +191,63 @@ struct TamaMergeArgs {
     cds: String,
 }
 
+// clap's short options are single characters. Translate only TAMA option
+// tokens, preserving values and non-UTF-8 paths, before handing them to clap.
+fn normalize_tama_args(mut args: Vec<OsString>) -> Vec<OsString> {
+    let Some(command) = args.get(1).and_then(|s| s.to_str()) else {
+        return args;
+    };
+    let legacy: &[&str] = match command {
+        "collapse" | "tama-collapse" => &["icm", "sj", "sjt", "lde", "ses", "log", "rm", "vc"],
+        "merge" | "tama-merge" => &["cds"],
+        _ => return args,
+    };
+    let mut value_next = false;
+    for arg in args.iter_mut().skip(2) {
+        if value_next {
+            value_next = false;
+            continue;
+        }
+        let Some(text) = arg.to_str() else { continue };
+        if text == "--" {
+            break;
+        }
+        let (option, attached) = text
+            .split_once('=')
+            .map_or((text, false), |(key, _)| (key, true));
+        let old = option
+            .strip_prefix('-')
+            .is_some_and(|key| legacy.contains(&key));
+        value_next = !attached
+            && (old
+                || matches!(
+                    option,
+                    "-s" | "-f"
+                        | "-p"
+                        | "-x"
+                        | "-e"
+                        | "-c"
+                        | "-i"
+                        | "-a"
+                        | "-m"
+                        | "-z"
+                        | "-d"
+                        | "-b"
+                        | "-v"
+                        | "--algo"
+                )
+                || option
+                    .strip_prefix("--")
+                    .is_some_and(|key| legacy.contains(&key)));
+        if old {
+            *arg = OsString::from(format!("-{text}"));
+        }
+    }
+    args
+}
+
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(normalize_tama_args(std::env::args_os().collect()));
     match cli.command {
         Command::Collapse(args) => {
             if args.algo != "tama" {
@@ -225,6 +282,10 @@ fn run_collapse(args: TamaCollapseArgs) -> ExitCode {
         println!("Program did not run");
         return ExitCode::SUCCESS;
     }
+    let (Some(sam), Some(fasta), Some(prefix)) = (args.sam, args.fasta, args.prefix) else {
+        eprintln!("TAMA collapse requires -s, -f and -p");
+        return ExitCode::from(2);
+    };
     let settings = CollapseSettings {
         cap: args.cap,
         ends: args.ends,
@@ -243,18 +304,11 @@ fn run_collapse(args: TamaCollapseArgs) -> ExitCode {
         log: args.log,
         run_mode: args.run_mode,
         var_support: args.var_support,
-        sam_label: args.sam.display().to_string(),
-        fasta_label: args.fasta.display().to_string(),
-        prefix_label: args.prefix.display().to_string(),
+        sam_label: sam.display().to_string(),
+        fasta_label: fasta.display().to_string(),
+        prefix_label: prefix.display().to_string(),
     };
-    let texts = match original_collapse(&args.sam, &args.fasta, &settings) {
-        Ok(texts) => texts,
-        Err(err) => {
-            eprintln!("{err}");
-            return ExitCode::from(1);
-        }
-    };
-    match write_collapse_texts(&args.prefix, &texts) {
+    match collapse_to_files(&sam, &fasta, &prefix, &settings) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("{err}");
@@ -288,28 +342,77 @@ fn run_flair_combine(args: FlairCombineArgs) -> ExitCode {
 }
 
 fn run_merge(args: TamaMergeArgs) -> ExitCode {
-    let input = MergeInput {
-        sources: vec![MergeSource {
-            path: args.filelist,
-            cap: String::new(),
-            priority: String::new(),
-            name: args.source_id,
-        }],
-        prefix: args.prefix,
+    let settings = MergeSettings {
+        ends: args.ends,
+        five_prime: args.five_prime,
+        exon_diff: args.exon,
+        three_prime: args.three_prime,
+        duplicates: args.duplicates,
+        source_id: args.source_id,
+        cds: args.cds,
     };
-    let _ = (
-        args.ends,
-        args.five_prime,
-        args.exon,
-        args.three_prime,
-        args.duplicates,
-        args.cds,
-    );
-    match TamaMerge.merge(&input) {
-        Ok(_) => ExitCode::SUCCESS,
-        Err(err) => {
-            eprintln!("{err}");
+    let result = read_merge_sources(&args.filelist)
+        .and_then(|sources| merge_sources(&sources, &settings))
+        .and_then(|texts| write_merge_texts(&args.prefix, &texts));
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("{e}");
             ExitCode::from(1)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn normalized(args: &[&str]) -> Vec<OsString> {
+        normalize_tama_args(args.iter().map(OsString::from).collect())
+    }
+
+    #[test]
+    fn legacy_options_do_not_rewrite_values_or_other_algorithms() {
+        assert_eq!(
+            normalized(&[
+                "braid",
+                "tama-collapse",
+                "-p",
+                "-rm",
+                "-icm=ident_map",
+                "--",
+                "-log"
+            ]),
+            [
+                "braid",
+                "tama-collapse",
+                "-p",
+                "-rm",
+                "--icm=ident_map",
+                "--",
+                "-log"
+            ]
+            .map(OsString::from),
+        );
+        let flair = ["braid", "flair-combine", "-m", "-rm", "-icm"];
+        assert_eq!(normalized(&flair), flair.map(OsString::from));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_options_preserve_non_utf8_paths() {
+        use std::os::unix::ffi::OsStringExt;
+        let path = OsString::from_vec(b"input-\xff.sam".to_vec());
+        let args = vec![
+            "braid".into(),
+            "collapse".into(),
+            "-s".into(),
+            path.clone(),
+            "-rm".into(),
+            "original".into(),
+        ];
+        let got = normalize_tama_args(args);
+        assert_eq!(got[3], path);
+        assert_eq!(got[4], "--rm");
     }
 }
