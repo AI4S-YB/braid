@@ -12,4 +12,5 @@ path = "src/main.rs"
 [dependencies]
 braid-model = { path = "../braid-model" }
 braid-tama = { path = "../braid-tama" }
+braid-flair = { path = "../braid-flair" }
 clap = { version = "4", features = ["derive"] }

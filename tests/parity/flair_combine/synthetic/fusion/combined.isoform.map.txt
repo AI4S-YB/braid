@@ -1,0 +1,3 @@
+flairiso1-1_ENSG0007	F__fusionisoform..fusA_ENSG0007	F__fusionisoform..fusB_ENSG0007
+flairiso2-1_ENSG0006	F__fusionisoform..fusSE_ENSG0006
+flairiso3-1_ENSG0006	F__fusionisoform..fusM_ENSG0006

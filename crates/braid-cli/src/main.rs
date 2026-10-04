@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use braid_flair::{combine, write_combine_texts, CombineSettings};
 use braid_model::{MergeAlgo, MergeInput, MergeSource};
 use braid_tama::{
     original_collapse, write_collapse_texts, CollapseSettings, TamaMerge, TAMA_COLLAPSE_DATE,
@@ -11,7 +12,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(
     name = "braid",
     version,
-    about = "Reconcile transcript models. Algorithms are selectable; TAMA is the first."
+    about = "Reconcile transcript models. TAMA collapse and FLAIR combine are available."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -24,10 +25,14 @@ enum Command {
     Collapse(CollapseArgs),
     /// Merge annotation sets into one transcriptome.
     Merge(MergeArgs),
+    /// Combine transcriptomes. FLAIR combine is available.
+    Combine(CombineArgs),
     /// Same flags as tama_collapse.py.
     TamaCollapse(TamaCollapseArgs),
     /// Same flags as tama_merge.py.
     TamaMerge(TamaMergeArgs),
+    /// Same flags as `flair combine`.
+    FlairCombine(FlairCombineArgs),
 }
 
 #[derive(Args)]
@@ -46,6 +51,44 @@ struct MergeArgs {
     algo: String,
     #[command(flatten)]
     tama: TamaMergeArgs,
+}
+
+#[derive(Args)]
+struct CombineArgs {
+    /// Algorithm. Only `flair` is available.
+    #[arg(long, default_value = "flair")]
+    algo: String,
+    #[command(flatten)]
+    flair: FlairCombineArgs,
+}
+
+#[derive(Args, Debug)]
+struct FlairCombineArgs {
+    /// Manifest. Each row is sample, type, bed, and optional fasta and read map.
+    #[arg(short = 'm', long = "manifest")]
+    manifest: PathBuf,
+    /// Output prefix.
+    #[arg(
+        short = 'o',
+        long = "output_prefix",
+        default_value = "flair.combined.isoforms"
+    )]
+    output_prefix: PathBuf,
+    /// Window for comparing ends of isoforms with the same intron chain.
+    #[arg(short = 'w', long = "endwindow", default_value_t = 200)]
+    endwindow: i64,
+    /// Minimum percent usage required in one sample. 10 means usage greater than 0.10.
+    #[arg(short = 'p', long = "minpercentusage", default_value_t = 10)]
+    minpercentusage: i64,
+    /// Also write a GTF from the combined BED.
+    #[arg(short = 'c', long = "convert_gtf")]
+    convert_gtf: bool,
+    /// Keep single-exon isoforms. Off by default.
+    #[arg(short = 's', long = "include_se")]
+    include_se: bool,
+    /// `usageandlongest`, `usageonly`, `none`, or a read-count threshold.
+    #[arg(short = 'f', long = "filter", default_value = "usageandlongest")]
+    filter: String,
 }
 
 #[derive(Args, Debug)]
@@ -165,6 +208,14 @@ fn main() -> ExitCode {
             run_merge(args.tama)
         }
         Command::TamaMerge(args) => run_merge(args),
+        Command::Combine(args) => {
+            if args.algo != "flair" {
+                eprintln!("unknown combine algorithm '{}'", args.algo);
+                return ExitCode::from(2);
+            }
+            run_flair_combine(args.flair)
+        }
+        Command::FlairCombine(args) => run_flair_combine(args),
     }
 }
 
@@ -204,6 +255,30 @@ fn run_collapse(args: TamaCollapseArgs) -> ExitCode {
         }
     };
     match write_collapse_texts(&args.prefix, &texts) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("{err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn run_flair_combine(args: FlairCombineArgs) -> ExitCode {
+    let settings = CombineSettings {
+        end_window: args.endwindow,
+        min_percent: args.minpercentusage,
+        include_single_exon: args.include_se,
+        filter: args.filter,
+        convert_gtf: args.convert_gtf,
+    };
+    let texts = match combine(&args.manifest, &settings) {
+        Ok(texts) => texts,
+        Err(err) => {
+            eprintln!("{err}");
+            return ExitCode::from(1);
+        }
+    };
+    match write_combine_texts(&args.output_prefix, &texts) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("{err}");

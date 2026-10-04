@@ -1,0 +1,8 @@
+Official fixtures and expected outputs are from BrooksLabUCSC/flair
+commit 573414c551332bf6348a9d04ba7cf562f67416cb.
+Copyright 2019-2026 The Regents of the University of California.
+BSD-3-Clause. The license text is FLAIR-LICENSE.txt.
+
+synthetic/ outputs were produced by that commit's src/flair/flair_combine.py.
+Inputs live under synthetic/in. Manifests are built by the Rust tests so they
+do not bake in absolute paths.

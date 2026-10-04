@@ -1,0 +1,5 @@
+chr1	150	400	fusiongene1_flairiso1-1_ENSG0007	1000	+	150	400	0	2	50,150,	0,100,
+chr2	1000	1650	fusiongene2_flairiso1-1_ENSG0007	1000	+	1000	1650	0	2	200,350,	0,300,
+chr8	100	180	fusiongene1_flairiso2-1_ENSG0006	1000	+	100	180	0	1	80,	0,
+chr9	500	900	fusiongene2_flairiso2-1_ENSG0006	1000	-	500	900	0	2	200,100,	0,300,
+chr5	100	500	fusiongene1_flairiso3-1_ENSG0006	1000	-	100	500	0	2	120,200,	0,200,

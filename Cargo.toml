@@ -4,6 +4,7 @@ members = [
     "crates/braid-model",
     "crates/braid-io",
     "crates/braid-tama",
+    "crates/braid-flair",
     "crates/braid-cli",
 ]
 

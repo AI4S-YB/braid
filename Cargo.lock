@@ -56,10 +56,15 @@ dependencies = [
 name = "braid-cli"
 version = "0.1.0"
 dependencies = [
+ "braid-flair",
  "braid-model",
  "braid-tama",
  "clap",
 ]
+
+[[package]]
+name = "braid-flair"
+version = "0.1.0"
 
 [[package]]
 name = "braid-io"

@@ -1,0 +1,14 @@
+chr1	FLAIR	transcript	151	400	.	+	.	gene_id "ENSG0007"; transcript_id "fusiongene1_flairiso1-1";
+chr1	FLAIR	exon	151	200	.	+	.	gene_id "ENSG0007"; transcript_id "fusiongene1_flairiso1-1"; exon_number "0";
+chr1	FLAIR	exon	251	400	.	+	.	gene_id "ENSG0007"; transcript_id "fusiongene1_flairiso1-1"; exon_number "1";
+chr2	FLAIR	transcript	1001	1650	.	+	.	gene_id "ENSG0007"; transcript_id "fusiongene2_flairiso1-1";
+chr2	FLAIR	exon	1001	1200	.	+	.	gene_id "ENSG0007"; transcript_id "fusiongene2_flairiso1-1"; exon_number "0";
+chr2	FLAIR	exon	1301	1650	.	+	.	gene_id "ENSG0007"; transcript_id "fusiongene2_flairiso1-1"; exon_number "1";
+chr8	FLAIR	transcript	101	180	.	+	.	gene_id "ENSG0006"; transcript_id "fusiongene1_flairiso2-1";
+chr8	FLAIR	exon	101	180	.	+	.	gene_id "ENSG0006"; transcript_id "fusiongene1_flairiso2-1"; exon_number "0";
+chr9	FLAIR	transcript	501	900	.	-	.	gene_id "ENSG0006"; transcript_id "fusiongene2_flairiso2-1";
+chr9	FLAIR	exon	501	700	.	-	.	gene_id "ENSG0006"; transcript_id "fusiongene2_flairiso2-1"; exon_number "0";
+chr9	FLAIR	exon	801	900	.	-	.	gene_id "ENSG0006"; transcript_id "fusiongene2_flairiso2-1"; exon_number "1";
+chr5	FLAIR	transcript	101	500	.	-	.	gene_id "ENSG0006"; transcript_id "fusiongene1_flairiso3-1";
+chr5	FLAIR	exon	101	220	.	-	.	gene_id "ENSG0006"; transcript_id "fusiongene1_flairiso3-1"; exon_number "0";
+chr5	FLAIR	exon	301	500	.	-	.	gene_id "ENSG0006"; transcript_id "fusiongene1_flairiso3-1"; exon_number "1";

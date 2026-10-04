@@ -1,0 +1,4 @@
+flairiso1-1_ENSG0011	E__isoforms..se_near_ENSG0011
+flairiso1-2_ENSG0011	E__isoforms..se_samebin_ENSG0011
+flairiso2-1_ENSG0012	E__isoforms..se_far_ENSG0012
+flairiso3-1_ENSG0010	E__isoforms..multi_ENSG0010

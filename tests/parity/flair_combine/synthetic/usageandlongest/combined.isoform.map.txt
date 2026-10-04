@@ -1,0 +1,8 @@
+1-1_ENST00000000001.1_ENSG0003	S1__isoforms..ENST00000000001.1_ENSG0003
+2-1_ENST00000000009.1_ENSG0009	S1__isoforms..ENST00000000009.1_ENSG0009
+flairiso3-1_ENSG0001	S1__isoforms..high_ENSG0001	S2__isoforms..s2_ENSG0001
+lowexpiso_ENSG0001	S1__isoforms..mid_ENSG0001
+flairiso3-3_ENSG0001	S1__isoforms..late_ENSG0001
+flairiso4-1_chr3:2900	S1__isoforms..readname_chr3:2900
+flairiso5-1_YY	S1__isoforms..long_ZZ	S1__isoforms..a_YY	S1__isoforms..b_YY
+flairiso6-1_ENSG0008	S2__isoforms..onlys2_ENSG0008
