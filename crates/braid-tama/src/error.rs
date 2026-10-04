@@ -483,12 +483,13 @@ mod tests {
 
     #[test]
     fn gmap_error_counts_and_splice_windows_match_oracle() {
-        let genome_records = read_fasta(&repo("../../../tama/test_files/test_genome.fa")).unwrap();
+        let genome_records =
+            read_fasta(&repo("../../tests/parity/gmap_collapse/test_genome.fa")).unwrap();
         let mut genomes = HashMap::new();
         for record in genome_records {
             genomes.insert(record.id, record.seq);
         }
-        let sam = read_sam(&repo("../../../tama/test_files/gmap_test.sam")).unwrap();
+        let sam = read_sam(&repo("../../tests/parity/gmap_collapse/gmap_test.sam")).unwrap();
         let read_txt =
             std::fs::read_to_string(repo("../../tests/parity/gmap_collapse/gmap_read.txt"))
                 .unwrap();

@@ -274,12 +274,13 @@ mod tests {
 
     #[test]
     fn gmap_lde_lines_match_oracle() {
-        let genomes: HashMap<_, _> = read_fasta(&repo("../../../tama/test_files/test_genome.fa"))
-            .unwrap()
-            .into_iter()
-            .map(|rec| (rec.id, rec.seq))
-            .collect();
-        let sam = read_sam(&repo("../../../tama/test_files/gmap_test.sam")).unwrap();
+        let genomes: HashMap<_, _> =
+            read_fasta(&repo("../../tests/parity/gmap_collapse/test_genome.fa"))
+                .unwrap()
+                .into_iter()
+                .map(|rec| (rec.id, rec.seq))
+                .collect();
+        let sam = read_sam(&repo("../../tests/parity/gmap_collapse/gmap_test.sam")).unwrap();
         let lde_txt = std::fs::read_to_string(repo(
             "../../tests/parity/gmap_collapse/gmap_local_density_error.txt",
         ))

@@ -598,8 +598,8 @@ mod tests {
     fn gmap_collapse_matches_oracle() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let texts = original_collapse(
-            &root.join("../../../tama/test_files/gmap_test.sam"),
-            &root.join("../../../tama/test_files/test_genome.fa"),
+            &root.join("../../tests/parity/gmap_collapse/gmap_test.sam"),
+            &root.join("../../tests/parity/gmap_collapse/test_genome.fa"),
             &CollapseSettings {
                 cap: "capped".to_string(),
                 ends: "common_ends".to_string(),
