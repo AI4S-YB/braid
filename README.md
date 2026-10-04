@@ -1,6 +1,6 @@
 # braid
 
-Reconcile transcript models with Rust implementations of **TAMA collapse**, **TAMA merge**, **FLAIR combine**, and **TACO meta-assembly**.
+Reconcile transcript models with Rust implementations of **TAMA collapse**, **TAMA merge**, **FLAIR combine**, **TACO meta-assembly**, and **SCOTCH** isoform quantification.
 
 The project focuses on reproducing upstream algorithm behavior and output formats. Algorithms run natively in Rust; Python is used only by development oracle scripts. Reading BAM files requires `samtools` on `PATH`.
 
@@ -12,6 +12,8 @@ The project focuses on reproducing upstream algorithm behavior and output format
 | `braid tama-merge` | Manifest of annotated BED12 files | Merged BED12 models and source reports |
 | `braid flair-combine` | Manifest of FLAIR transcriptomes | Combined BED12, counts, and isoform map |
 | `braid taco` | Manifest of sample GTF files | Assembled GTF/BED and diagnostic tracks |
+| `braid scotch` | Reference GTF and one BAM/SAM group per sample | Per-sample gene and transcript counts |
+| `braid scotch-dtu` | Two SCOTCH count directories | Gene Wilcoxon and transcript usage tests |
 
 The equivalent general commands are `collapse --algo tama`, `merge --algo tama`, and `combine --algo flair`. These are currently the only algorithms available for those commands.
 
@@ -175,6 +177,23 @@ TACO currently runs in one process. `--num-processes` is accepted for command-li
 
 For all manifests above, relative input paths are resolved against the **current working directory**, not the manifest's directory.
 
+## SCOTCH quantification
+
+`braid scotch` assigns each cell UMI in a full-length long-read BAM or SAM to a known or novel isoform of a gene in the reference GTF.
+
+```sh
+braid scotch --bam sample.bam --gtf genes.gtf --out scotch_out
+braid scotch-dtu --a scotch_out/sampleA --b scotch_out/sampleB --out dtu.tsv
+```
+
+Repeat `--bam` for more than one sample. A path may be a file or a directory of `*.bam` and `*.sam` files; a directory is one sample. Samples share the annotation and discover novel isoforms together. Counts are written per sample.
+
+`--platform` is `10x-ont` (cell tag `CB`, UMI tag `UB`), `10x-pacbio` (`CB` and `XM`), `parse-ont` (barcode fields in the read name), or `bulk` (every read in a sample is one cell). `--barcode-cell` and `--barcode-umi` override the 10x tags. The longest alignment is kept for each cell and UMI. `--fasta` rejects a called poly(A) or poly(T) tail when the genome has a homopolymer at the alignment end. `--update-gtf` splits reference sub-exons using coverage before assignment. `--workers` is accepted and does not run the quantification in parallel.
+
+A read that matches no annotated isoform can seed a novel isoform. SCOTCH keeps that isoform only when a discovery chunk assigns at least 10 reads. Shorter novel copies are grouped into a longer isoform when the extra exons sit on the truncated end, unless `--no-group-novel` is set. `--novel-read-n` and `--novel-read-pct` drop weakly supported novels after that grouping; their reads are counted as `uncategorized_novel`.
+
+Each sample directory contains `count_matrix/gene_counts.csv`, `count_matrix/transcript_counts.csv`, `count_matrix/gene_transcript.tsv`, and `auxiliary/assignments.tsv`. The output directory also contains `annotation.gtf`: the reference records plus novel transcripts. Gene p-values from `scotch-dtu` are Holm-adjusted. Transcript and DTU gene p-values are Benjamini-Hochberg adjusted. A transcript test requires at least 20 cells and 20 total counts in each group.
+
 ## Compatibility and validation
 
 | Algorithm | Upstream reference |
@@ -182,12 +201,15 @@ For all manifests above, relative input paths are resolved against the **current
 | TAMA | Commit `2fa3c308282190c413e9bf0e0b49e63086eef7d4`; collapse date `2023_03_28` |
 | FLAIR combine | Commit `573414c551332bf6348a9d04ba7cf562f67416cb` |
 | TACO | Version `0.7.3`, commit `eeaeb879b8622365123edbc61ebc100d84194b80` |
+| SCOTCH | Commit `15d6ad8b6319cf806c36f677ffe3ebcc003cae16` |
 
 Tests compare output files against frozen fixtures and exercise CLI compatibility, SAM/BAM equivalence, grouping modes, and regression cases. This is evidence for the covered cases, not a guarantee of equivalence for every input.
 
 TAMA reproduces CPython 2.7 dictionary traversal with `PYTHONHASHSEED=0` and Python 2 numeric formatting. Some mode fixtures were generated through a development-only Python 2 semantic adapter; see [their provenance](tests/parity/tama_modes/ORIGIN.txt). FLAIR fixture provenance is recorded in [UPSTREAM.txt](tests/parity/flair_combine/UPSTREAM.txt).
 
 TACO uses deterministic sorted neighbor traversal rather than reproducing a particular Python 2 hash seed. Tied path choices may therefore differ from upstream. Console logs and upstream error-path exit codes are not covered by file parity.
+
+SCOTCH keeps the lowest community id when Louvain moves are tied, and the lowest gene id when gene assignments are tied. Upstream breaks those ties at random. A read that stays compatible with more than one known isoform is assigned by exon distance instead of a random draw. Novel discovery clusters every unassigned read in chunks of 1500 and does not draw the upstream random subsample. PacBio reads are treated as polyadenylated unless `--fasta` marks the tail as internal priming.
 
 ## Development
 
@@ -213,6 +235,7 @@ BRAID_REQUIRE_SAMTOOLS=1 cargo test --workspace --locked
 | `crates/braid-tama` | TAMA algorithms and Python 2 compatibility semantics |
 | `crates/braid-flair` | FLAIR combine |
 | `crates/braid-taco` | TACO assembly and graph algorithms |
+| `crates/braid-scotch` | SCOTCH quantification and differential transcript usage |
 | `tests/parity` | Frozen input/output fixtures and provenance |
 | `oracle` | Development scripts for upstream comparisons |
 
@@ -220,4 +243,4 @@ Shared `Transcript` coordinates use 1-based starts and exclusive ends in that sa
 
 ## License
 
-Workspace packages declare **GPL-3.0-only**. The bundled FLAIR fixtures retain their [BSD-3-Clause license](tests/parity/flair_combine/FLAIR-LICENSE.txt).
+Workspace packages declare **GPL-3.0-only**. The bundled FLAIR fixtures retain their [BSD-3-Clause license](tests/parity/flair_combine/FLAIR-LICENSE.txt). The SCOTCH algorithm follows WGLab/SCOTCH, which is MIT licensed; this repository reimplements that behavior and does not copy the upstream sources.

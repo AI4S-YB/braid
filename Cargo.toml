@@ -6,6 +6,7 @@ members = [
     "crates/braid-tama",
     "crates/braid-flair",
     "crates/braid-taco",
+    "crates/braid-scotch",
     "crates/braid-cli",
 ]
 

@@ -1,0 +1,10 @@
+[package]
+name = "braid-scotch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SCOTCH single-cell full-length isoform quantification"
+
+[dependencies]
+braid-io = { path = "../braid-io" }
+statrs = "0.18"

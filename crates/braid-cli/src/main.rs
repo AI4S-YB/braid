@@ -3,6 +3,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use braid_flair::{combine, write_combine_texts, CombineSettings};
+use braid_scotch::{
+    differential_usage, quantify, write_dtu, DtuSettings, Platform, ScotchSettings,
+};
 use braid_taco::{assemble, write_taco_texts, TacoSettings};
 use braid_tama::{
     collapse_to_files, merge_sources, read_merge_sources, write_merge_texts, CollapseSettings,
@@ -14,7 +17,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(
     name = "braid",
     version,
-    about = "Reconcile transcript models with TAMA collapse, TAMA merge, FLAIR combine and TACO.",
+    about = "Reconcile transcript models with TAMA collapse, TAMA merge, FLAIR combine, TACO, and SCOTCH.",
     after_help = "TAMA supports capped/no_cap and original/low_mem modes. BAM input requires samtools on PATH. Legacy TAMA single-dash options are accepted; console logs may differ from upstream."
 )]
 struct Cli {
@@ -38,6 +41,10 @@ enum Command {
     FlairCombine(FlairCombineArgs),
     /// Meta-assemble sample GTFs with TACO.
     Taco(TacoArgs),
+    /// Quantify single-cell full-length isoforms with SCOTCH.
+    Scotch(ScotchArgs),
+    /// Test differential transcript usage between two SCOTCH count directories.
+    ScotchDtu(ScotchDtuArgs),
 }
 
 #[derive(Args)]
@@ -287,6 +294,113 @@ struct TacoArgs {
     genome_fasta: Option<PathBuf>,
 }
 
+#[derive(Args, Debug)]
+struct ScotchArgs {
+    /// BAM or SAM file, or a directory of them. Repeat for one sample per path.
+    #[arg(long = "bam", required = true)]
+    bam: Vec<PathBuf>,
+    /// Reference GTF.
+    #[arg(long)]
+    gtf: PathBuf,
+    /// Output directory. Each sample is written underneath it.
+    #[arg(long)]
+    out: PathBuf,
+    /// Genome FASTA. Used to reject internal priming when a poly(A) or poly(T) is detected.
+    #[arg(long)]
+    fasta: Option<PathBuf>,
+    /// Refine sub-exons from read coverage before assignment.
+    #[arg(long)]
+    update_gtf: bool,
+    /// `10x-ont`, `10x-pacbio`, `parse-ont`, or `bulk`.
+    #[arg(long, default_value = "10x-ont")]
+    platform: String,
+    /// Cell-barcode tag. Defaults are CB for 10x and the read name for Parse.
+    #[arg(long)]
+    barcode_cell: Option<String>,
+    /// UMI tag. Defaults are UB for 10x-ont and XM for 10x-pacbio.
+    #[arg(long)]
+    barcode_umi: Option<String>,
+    /// Limit quantification to these gene names or ids. Repeat the flag for more than one gene.
+    #[arg(long = "gene")]
+    gene: Vec<String>,
+    /// Exon coverage at or below this fraction is a skip.
+    #[arg(long, default_value_t = 0.1)]
+    match_low: f64,
+    /// Exon coverage at or above this fraction is a match.
+    #[arg(long, default_value_t = 0.6)]
+    match_high: f64,
+    /// Ignore exons shorter than this when matching known isoforms.
+    #[arg(long, default_value_t = 0)]
+    small_exon: i64,
+    /// Upper bound of the small-exon threshold.
+    #[arg(long, default_value_t = 80)]
+    small_exon_high: i64,
+    /// Truncated ends at or above this fraction are treated as fully covered.
+    #[arg(long, default_value_t = 0.4)]
+    truncation_match: f64,
+    /// Drop novel isoforms supported by fewer reads than this.
+    #[arg(long, default_value_t = 0)]
+    novel_read_n: i64,
+    /// Drop novel isoforms whose share of known plus novel reads is below this.
+    #[arg(long, default_value_t = 0.0)]
+    novel_read_pct: f64,
+    /// Keep each novel isoform separate instead of grouping truncated copies.
+    #[arg(long)]
+    no_group_novel: bool,
+    /// Minimum coverage as a fraction of the peak when refining exons.
+    #[arg(long, default_value_t = 0.02)]
+    coverage_exon: f64,
+    /// Minimum junction support as a fraction of the strongest junction.
+    #[arg(long, default_value_t = 0.02)]
+    coverage_splice: f64,
+    /// Z-score for splitting an exon at a coverage change.
+    #[arg(long, default_value_t = 10.0)]
+    z_score: f64,
+    /// Accepted for compatibility. Quantification runs in one process.
+    #[arg(long, default_value_t = 1)]
+    workers: i64,
+}
+
+#[derive(Args, Debug)]
+struct ScotchDtuArgs {
+    /// Sample directory, or its `count_matrix` directory, for group A.
+    #[arg(long)]
+    a: Option<PathBuf>,
+    /// Sample directory, or its `count_matrix` directory, for group B.
+    #[arg(long)]
+    b: Option<PathBuf>,
+    /// Gene count CSV for group A.
+    #[arg(long)]
+    gene_a: Option<PathBuf>,
+    /// Transcript count CSV for group A.
+    #[arg(long)]
+    transcript_a: Option<PathBuf>,
+    /// Gene-to-transcript map for group A.
+    #[arg(long)]
+    map_a: Option<PathBuf>,
+    /// Gene count CSV for group B.
+    #[arg(long)]
+    gene_b: Option<PathBuf>,
+    /// Transcript count CSV for group B.
+    #[arg(long)]
+    transcript_b: Option<PathBuf>,
+    /// Gene-to-transcript map for group B.
+    #[arg(long)]
+    map_b: Option<PathBuf>,
+    /// Output TSV.
+    #[arg(long)]
+    out: PathBuf,
+    /// Added to gene counts before the Wilcoxon test.
+    #[arg(long, default_value_t = 0.01)]
+    epsilon: f64,
+    /// Sum transcript columns whose names contain `novel` before the test.
+    #[arg(long)]
+    group_novel: bool,
+    /// Isoforms below this usage in both groups collapse into `other`.
+    #[arg(long, default_value_t = 0.05)]
+    rare: f64,
+}
+
 // clap's short options are single characters. Translate only TAMA option
 // tokens, preserving values and non-UTF-8 paths, before handing them to clap.
 fn normalize_tama_args(mut args: Vec<OsString>) -> Vec<OsString> {
@@ -370,6 +484,8 @@ fn main() -> ExitCode {
         }
         Command::FlairCombine(args) => run_flair_combine(args),
         Command::Taco(args) => run_taco(args),
+        Command::Scotch(args) => run_scotch(args),
+        Command::ScotchDtu(args) => run_scotch_dtu(args),
     }
 }
 
@@ -485,6 +601,116 @@ fn run_taco(args: TacoArgs) -> ExitCode {
         genome_fasta: args.genome_fasta,
     };
     match assemble(&settings).and_then(|texts| write_taco_texts(&args.output_dir, &texts)) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("{err}");
+            ExitCode::from(if err.usage { 2 } else { 1 })
+        }
+    }
+}
+
+fn run_scotch(args: ScotchArgs) -> ExitCode {
+    let platform = match args.platform.as_str() {
+        "10x-ont" => Platform::TenxOnt,
+        "10x-pacbio" => Platform::TenxPacbio,
+        "parse-ont" => Platform::ParseOnt,
+        "bulk" => Platform::Bulk,
+        other => {
+            eprintln!("unknown platform '{other}'");
+            return ExitCode::from(2);
+        }
+    };
+    if args.novel_read_n < 0 || args.workers < 0 {
+        eprintln!("--novel-read-n and --workers must be non-negative");
+        return ExitCode::from(2);
+    }
+    let mut settings = ScotchSettings {
+        bams: args.bam,
+        gtf: args.gtf,
+        out: args.out,
+        fasta: args.fasta,
+        update_gtf: args.update_gtf,
+        platform,
+        barcode_cell: args.barcode_cell,
+        barcode_umi: args.barcode_umi,
+        genes: args.gene,
+        novel_read_n: args.novel_read_n as usize,
+        novel_read_pct: args.novel_read_pct,
+        group_novel: !args.no_group_novel,
+        exon_fraction: args.coverage_exon,
+        splice_fraction: args.coverage_splice,
+        z_score: args.z_score,
+        workers: args.workers as usize,
+        ..ScotchSettings::default()
+    };
+    settings.params.low = args.match_low;
+    settings.params.high = args.match_high;
+    settings.params.small_exon = args.small_exon;
+    settings.params.small_exon_high = args.small_exon_high;
+    settings.params.truncation_match = args.truncation_match;
+    match quantify(&settings) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("{err}");
+            ExitCode::from(if err.usage { 2 } else { 1 })
+        }
+    }
+}
+
+fn count_table(
+    dir: Option<PathBuf>,
+    gene: Option<PathBuf>,
+    transcript: Option<PathBuf>,
+    map: Option<PathBuf>,
+) -> Result<(PathBuf, PathBuf, PathBuf), String> {
+    let base = dir.as_ref().map(|path| {
+        if path.join("count_matrix").is_dir() {
+            path.join("count_matrix")
+        } else {
+            path.clone()
+        }
+    });
+    let pick = |explicit: Option<PathBuf>, name: &str| -> Result<PathBuf, String> {
+        if let Some(path) = explicit {
+            return Ok(path);
+        }
+        base.as_ref()
+            .map(|dir| dir.join(name))
+            .ok_or_else(|| format!("provide --a/--b or an explicit {name} path"))
+    };
+    Ok((
+        pick(gene, "gene_counts.csv")?,
+        pick(transcript, "transcript_counts.csv")?,
+        pick(map, "gene_transcript.tsv")?,
+    ))
+}
+
+fn run_scotch_dtu(args: ScotchDtuArgs) -> ExitCode {
+    let group_a = match count_table(args.a, args.gene_a, args.transcript_a, args.map_a) {
+        Ok(paths) => paths,
+        Err(err) => {
+            eprintln!("{err}");
+            return ExitCode::from(2);
+        }
+    };
+    let group_b = match count_table(args.b, args.gene_b, args.transcript_b, args.map_b) {
+        Ok(paths) => paths,
+        Err(err) => {
+            eprintln!("{err}");
+            return ExitCode::from(2);
+        }
+    };
+    let settings = DtuSettings {
+        epsilon: args.epsilon,
+        group_novel: args.group_novel,
+        rare: args.rare,
+        ..DtuSettings::default()
+    };
+    match differential_usage(
+        &group_a.0, &group_a.1, &group_a.2, &group_b.0, &group_b.1, &group_b.2, &settings,
+    )
+    .and_then(|tables| write_dtu(&args.out, &tables))
+    {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("{err}");

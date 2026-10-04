@@ -247,6 +247,53 @@ fn merge_is_available_and_legacy_cds_reaches_input_validation() {
 }
 
 #[test]
+fn scotch_quantifies_a_sam_group_and_help_lists_the_command() {
+    let help = run(&["--help"]);
+    let text = String::from_utf8(help.stdout).unwrap();
+    assert!(text.contains("  scotch "));
+    assert!(text.contains("  scotch-dtu "));
+    assert!(!text.contains("not implemented"));
+    let dir = WorkDir::new();
+    let gtf = dir.0.join("genes.gtf");
+    fs::write(
+        &gtf,
+        "\
+chr1\t.\tgene\t101\t200\t.\t+\t.\tgene_id \"G1\"; gene_name \"GENE1\";\n\
+chr1\t.\ttranscript\t101\t200\t.\t+\t.\tgene_id \"G1\"; gene_name \"GENE1\"; transcript_id \"ONLY\";\n\
+chr1\t.\texon\t101\t200\t.\t+\t.\tgene_id \"G1\"; gene_name \"GENE1\"; transcript_id \"ONLY\";\n",
+    )
+    .unwrap();
+    let sam = dir.0.join("cells.sam");
+    fs::write(
+        &sam,
+        format!(
+            "R1\t0\tchr1\t101\t60\t100M\t*\t0\t0\t{}\t*\tCB:Z:C1\tUB:Z:U1\n",
+            "ACGT".repeat(25)
+        ),
+    )
+    .unwrap();
+    let out = dir.0.join("scotch");
+    let output = Command::new(env!("CARGO_BIN_EXE_braid"))
+        .arg("scotch")
+        .arg("--bam")
+        .arg(&sam)
+        .arg("--gtf")
+        .arg(&gtf)
+        .arg("--out")
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let counts = fs::read_to_string(out.join("cells/count_matrix/gene_counts.csv")).unwrap();
+    assert!(counts.contains("C1:sample0"));
+    assert!(counts.contains("GENE1"));
+}
+
+#[test]
 fn taco_cli_assembles_one_sample_and_rejects_a_second_run() {
     let dir = WorkDir::new();
     let gtf = dir.0.join("a.gtf");

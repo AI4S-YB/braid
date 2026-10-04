@@ -14,4 +14,5 @@ braid-model = { path = "../braid-model" }
 braid-tama = { path = "../braid-tama" }
 braid-flair = { path = "../braid-flair" }
 braid-taco = { path = "../braid-taco" }
+braid-scotch = { path = "../braid-scotch" }
 clap = { version = "4", features = ["derive"] }
