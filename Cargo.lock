@@ -58,6 +58,7 @@ version = "0.1.0"
 dependencies = [
  "braid-flair",
  "braid-model",
+ "braid-taco",
  "braid-tama",
  "clap",
 ]
@@ -76,6 +77,14 @@ dependencies = [
 [[package]]
 name = "braid-model"
 version = "0.1.0"
+
+[[package]]
+name = "braid-taco"
+version = "0.1.0"
+dependencies = [
+ "braid-io",
+ "braid-model",
+]
 
 [[package]]
 name = "braid-tama"

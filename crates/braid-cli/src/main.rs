@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use braid_flair::{combine, write_combine_texts, CombineSettings};
+use braid_taco::{assemble, write_taco_texts, TacoSettings};
 use braid_tama::{
     collapse_to_files, merge_sources, read_merge_sources, write_merge_texts, CollapseSettings,
     MergeSettings, TAMA_COLLAPSE_DATE,
@@ -13,7 +14,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(
     name = "braid",
     version,
-    about = "Reconcile transcript models with TAMA collapse, TAMA merge and FLAIR combine.",
+    about = "Reconcile transcript models with TAMA collapse, TAMA merge, FLAIR combine and TACO.",
     after_help = "TAMA supports capped/no_cap and original/low_mem modes. BAM input requires samtools on PATH. Legacy TAMA single-dash options are accepted; console logs may differ from upstream."
 )]
 struct Cli {
@@ -35,6 +36,8 @@ enum Command {
     TamaMerge(TamaMergeArgs),
     /// Same flags as `flair combine`.
     FlairCombine(FlairCombineArgs),
+    /// Meta-assemble sample GTFs with TACO.
+    Taco(TacoArgs),
 }
 
 #[derive(Args)]
@@ -191,6 +194,99 @@ struct TamaMergeArgs {
     cds: String,
 }
 
+#[derive(Args, Debug)]
+struct TacoArgs {
+    /// Sample table. Each row is a GTF path and an optional sample id.
+    sample_file: PathBuf,
+    /// Directory where TACO writes its output files.
+    #[arg(short = 'o', long = "output-dir", default_value = "output")]
+    output_dir: PathBuf,
+    /// Accepted for compatibility. This port always uses one process so transcript ids stay reproducible.
+    #[arg(short = 'p', long = "num-processes", default_value_t = 1)]
+    num_processes: i64,
+    /// Accepted for compatibility.
+    #[arg(short = 'v', long = "verbose")]
+    verbose: bool,
+    /// Not supported. This port does not resume a partial run.
+    #[arg(long = "resume")]
+    resume: bool,
+    /// Not supported. Pass sample GTFs instead of a preexisting BED file.
+    #[arg(long = "assemble")]
+    assemble_bed: Option<PathBuf>,
+    /// GTF attribute that holds expression.
+    #[arg(long = "gtf-expr-attr", default_value = "FPKM")]
+    gtf_expr_attr: String,
+    /// Drop input transcripts shorter than this.
+    #[arg(long = "filter-min-length", default_value_t = 200)]
+    filter_min_length: i64,
+    /// Drop input transcripts whose normalized expression is below this.
+    #[arg(long = "filter-min-expr", default_value_t = 0.5)]
+    filter_min_expr: f64,
+    /// Keep isoforms at least this fraction of the major isoform in the gene.
+    #[arg(long = "isoform-frac", default_value_t = 0.05)]
+    isoform_frac: f64,
+    /// Maximum isoforms to report for each gene. Zero means no limit.
+    #[arg(long = "max-isoforms", default_value_t = 0)]
+    max_isoforms: i64,
+    /// Assemble transcripts that stay unstranded.
+    #[arg(
+        long = "assemble-unstranded",
+        conflicts_with = "no_assemble_unstranded"
+    )]
+    assemble_unstranded: bool,
+    /// Leave unstranded transcripts out of the assembly.
+    #[arg(long = "no-assemble-unstranded")]
+    no_assemble_unstranded: bool,
+    /// Run change-point detection. On unless `--no-change-point` is set.
+    #[arg(long = "change-point", conflicts_with = "no_change_point")]
+    change_point: bool,
+    /// Skip change-point detection.
+    #[arg(long = "no-change-point")]
+    no_change_point: bool,
+    /// Mann-Whitney p-value threshold for a change point.
+    #[arg(long = "change-point-pvalue", default_value_t = 0.01)]
+    change_point_pvalue: f64,
+    /// Fold-change threshold for a change point.
+    #[arg(long = "change-point-fold-change", default_value_t = 0.85)]
+    change_point_fold_change: f64,
+    /// Trim transcript ends around change points. On unless `--no-change-point-trim` is set.
+    #[arg(long = "change-point-trim", conflicts_with = "no_change_point_trim")]
+    change_point_trim: bool,
+    /// Leave transcript ends untrimmed.
+    #[arg(long = "no-change-point-trim")]
+    no_change_point_trim: bool,
+    /// Largest k considered for the path graph. Zero uses the longest transcript.
+    #[arg(long = "path-kmax", default_value_t = 0)]
+    path_kmax: i64,
+    /// Stop the path search below this fraction of the best path.
+    #[arg(long = "path-frac", default_value_t = 0.0)]
+    path_frac: f64,
+    /// Stop after this many paths. Zero means no limit.
+    #[arg(long = "max-paths", default_value_t = 0)]
+    max_paths: i64,
+    /// Reference GTF used by the guided modes.
+    #[arg(long = "ref-gtf")]
+    ref_gtf: Option<PathBuf>,
+    /// Resolve unstranded transcripts with the reference strand.
+    #[arg(long = "guided-strand")]
+    guided_strand: bool,
+    /// Use reference transcript ends as graph boundaries.
+    #[arg(long = "guided-ends")]
+    guided_ends: bool,
+    /// Include reference transcripts in the path graph.
+    #[arg(long = "guided-assembly")]
+    guided_assembly: bool,
+    /// Drop transcripts with splice motifs other than GTAG, GCAG, and ATAC.
+    #[arg(long = "filter-splice-juncs")]
+    filter_splice_juncs: bool,
+    /// Extra 4-base splice motif allowed by `--filter-splice-juncs`. Repeatable.
+    #[arg(long = "add-splice-motif")]
+    splice_motifs: Vec<String>,
+    /// Genome FASTA used by `--filter-splice-juncs`.
+    #[arg(long = "ref-genome-fasta")]
+    genome_fasta: Option<PathBuf>,
+}
+
 // clap's short options are single characters. Translate only TAMA option
 // tokens, preserving values and non-UTF-8 paths, before handing them to clap.
 fn normalize_tama_args(mut args: Vec<OsString>) -> Vec<OsString> {
@@ -273,6 +369,7 @@ fn main() -> ExitCode {
             run_flair_combine(args.flair)
         }
         Command::FlairCombine(args) => run_flair_combine(args),
+        Command::Taco(args) => run_taco(args),
     }
 }
 
@@ -337,6 +434,61 @@ fn run_flair_combine(args: FlairCombineArgs) -> ExitCode {
         Err(err) => {
             eprintln!("{err}");
             ExitCode::from(1)
+        }
+    }
+}
+
+fn run_taco(args: TacoArgs) -> ExitCode {
+    if args.resume {
+        eprintln!("--resume is not supported");
+        return ExitCode::from(2);
+    }
+    if args.assemble_bed.is_some() {
+        eprintln!("--assemble is not supported");
+        return ExitCode::from(2);
+    }
+    let _ = (
+        args.num_processes,
+        args.verbose,
+        args.change_point,
+        args.change_point_trim,
+        args.no_assemble_unstranded,
+    );
+    if args.output_dir.exists() {
+        eprintln!(
+            "Output directory '{}' already exists",
+            args.output_dir.display()
+        );
+        return ExitCode::from(2);
+    }
+    let settings = TacoSettings {
+        sample_file: args.sample_file,
+        gtf_expr_attr: args.gtf_expr_attr,
+        filter_min_length: args.filter_min_length,
+        filter_min_expr: args.filter_min_expr,
+        isoform_frac: args.isoform_frac,
+        max_isoforms: args.max_isoforms,
+        assemble_unstranded: args.assemble_unstranded,
+        change_point: !args.no_change_point,
+        change_point_pvalue: args.change_point_pvalue,
+        change_point_fold_change: args.change_point_fold_change,
+        change_point_trim: !args.no_change_point_trim,
+        path_kmax: args.path_kmax,
+        path_frac: args.path_frac,
+        max_paths: args.max_paths,
+        ref_gtf: args.ref_gtf,
+        guided_strand: args.guided_strand,
+        guided_ends: args.guided_ends,
+        guided_assembly: args.guided_assembly,
+        filter_splice_juncs: args.filter_splice_juncs,
+        splice_motifs: args.splice_motifs,
+        genome_fasta: args.genome_fasta,
+    };
+    match assemble(&settings).and_then(|texts| write_taco_texts(&args.output_dir, &texts)) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("{err}");
+            ExitCode::from(if err.usage { 2 } else { 1 })
         }
     }
 }

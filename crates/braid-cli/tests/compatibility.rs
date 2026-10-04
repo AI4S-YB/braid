@@ -144,6 +144,75 @@ fn merge_is_available_and_legacy_cds_reaches_input_validation() {
 }
 
 #[test]
+fn taco_cli_assembles_one_sample_and_rejects_a_second_run() {
+    let dir = WorkDir::new();
+    let gtf = dir.0.join("a.gtf");
+    fs::write(
+        &gtf,
+        "\
+chr1\tA\ttranscript\t1000\t2000\t.\t+\t.\ttranscript_id \"t1\"; FPKM \"4\";\n\
+chr1\tA\texon\t1000\t1200\t.\t+\t.\ttranscript_id \"t1\";\n\
+chr1\tA\texon\t1400\t1600\t.\t+\t.\ttranscript_id \"t1\";\n\
+chr1\tA\texon\t1800\t2000\t.\t+\t.\ttranscript_id \"t1\";\n",
+    )
+    .unwrap();
+    let samples = dir.0.join("samples.tsv");
+    fs::write(&samples, format!("{}\n", gtf.display())).unwrap();
+    let out = dir.0.join("taco");
+    let output = Command::new(env!("CARGO_BIN_EXE_braid"))
+        .arg("taco")
+        .arg("-o")
+        .arg(&out)
+        .arg(&samples)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read_dir(&out).unwrap().count(), 14);
+    let assembly = fs::read_to_string(out.join("assembly.gtf")).unwrap();
+    assert_eq!(
+        assembly,
+        "\
+chr1\ttaco\ttranscript\t1000\t2000\t1000\t+\t.\texpr \"1000000.000\"; rel_frac \"1.00000\"; abs_frac \"1.00000\"; locus_id \"L1\"; gene_id \"G1\"; tss_id \"TSS1\"; transcript_id \"TU1\";\n\
+chr1\ttaco\texon\t1000\t1200\t1000\t+\t.\tlocus_id \"L1\"; gene_id \"G1\"; tss_id \"TSS1\"; transcript_id \"TU1\";\n\
+chr1\ttaco\texon\t1400\t1600\t1000\t+\t.\tlocus_id \"L1\"; gene_id \"G1\"; tss_id \"TSS1\"; transcript_id \"TU1\";\n\
+chr1\ttaco\texon\t1800\t2000\t1000\t+\t.\tlocus_id \"L1\"; gene_id \"G1\"; tss_id \"TSS1\"; transcript_id \"TU1\";\n"
+    );
+    let again = Command::new(env!("CARGO_BIN_EXE_braid"))
+        .arg("taco")
+        .arg("-o")
+        .arg(&out)
+        .arg(&samples)
+        .output()
+        .unwrap();
+    assert_eq!(again.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&again.stderr).contains("already exists"));
+
+    let missing = Command::new(env!("CARGO_BIN_EXE_braid"))
+        .arg("taco")
+        .arg("-o")
+        .arg(dir.0.join("other"))
+        .arg(dir.0.join("missing.tsv"))
+        .output()
+        .unwrap();
+    assert_eq!(missing.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("not found"));
+
+    let help = run(&["--help"]);
+    assert!(help.status.success());
+    assert!(String::from_utf8_lossy(&help.stdout).contains("taco"));
+    let taco_help = run(&["taco", "--help"]);
+    assert!(taco_help.status.success());
+    let text = String::from_utf8(taco_help.stdout).unwrap();
+    assert!(text.contains("one process"));
+    assert!(text.contains("--resume"));
+    assert!(text.contains("--assemble"));
+}
+
+#[test]
 fn flair_cli_writes_filtered_chain_regression_outputs() {
     let golden = parity().join("flair_combine/regressions/consecutive-filtered-chains");
     let dir = WorkDir::new();
