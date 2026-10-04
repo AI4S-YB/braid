@@ -1,0 +1,9 @@
+[package]
+name = "braid-io"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "FASTA, SAM, and TAMA-dialect BED12 IO"
+
+[dependencies]
+braid-model = { path = "../braid-model" }

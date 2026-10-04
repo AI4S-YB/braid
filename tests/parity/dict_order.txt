@@ -1,0 +1,10 @@
+PYTHONHASHSEED=0 is stable across runs and is not insertion order.
+Seed 0, seed 1, and an unset seed produce three different iteration orders.
+Every probed key set differed from its insertion order: read ids, splice-error
+priorities, coordinates, gene numbers, error strings, and a 64-key resize.
+
+TAMA output that walks a dict therefore cannot use HashMap or IndexMap.
+The compatible map belongs in braid-tama only (Py27Dict, CPython 2.7, seed 0).
+Raw probes: dict_seed0.txt, dict_seed1.txt, dict_seed_unset.txt.
+Float format spec: py2_round_str.tsv. CIGAR spec: cigar_synthetic.tsv, cigar_gmap.tsv.
+Oracle image: python:2.7.18@sha256:cfa62318c459b1fde9e0841c619906d15ada5910d625176e24bf692cf8a2601d

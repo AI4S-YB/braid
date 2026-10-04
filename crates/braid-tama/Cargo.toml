@@ -1,0 +1,10 @@
+[package]
+name = "braid-tama"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TAMA collapse and merge, output-compatible with CPython 2.7"
+
+[dependencies]
+braid-model = { path = "../braid-model" }
+braid-io = { path = "../braid-io" }

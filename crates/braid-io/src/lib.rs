@@ -1,0 +1,11 @@
+//! Readers and writers. SAM parsing keeps the raw CIGAR string. TAMA's
+//! `X`/`=` folding lives in `braid-tama`, because a normal SAM parser must
+//! not treat mismatch operators as matches.
+
+mod bed;
+mod fasta;
+mod sam;
+
+pub use bed::tama_bed12;
+pub use fasta::{read_fasta, FastaRecord};
+pub use sam::{read_sam, SamClass, SamRecord};
