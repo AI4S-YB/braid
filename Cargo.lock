@@ -66,6 +66,9 @@ dependencies = [
 [[package]]
 name = "braid-flair"
 version = "0.2.0"
+dependencies = [
+ "braid-io",
+]
 
 [[package]]
 name = "braid-io"

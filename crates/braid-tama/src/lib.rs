@@ -11,6 +11,7 @@
 mod cigar;
 mod error;
 mod group;
+mod ids;
 mod lde;
 mod merge;
 mod polya;

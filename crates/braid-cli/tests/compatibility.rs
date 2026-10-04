@@ -124,6 +124,109 @@ fn tama_execution_still_requires_inputs() {
 }
 
 #[test]
+fn collapse_preflight_errors_preserve_existing_outputs() {
+    let golden = parity().join("gmap_collapse");
+    for mode in ["original", "low_mem"] {
+        for failure in ["cap", "sam", "fasta"] {
+            let dir = WorkDir::new();
+            let prefix = dir.0.join("out");
+            let existing = [dir.0.join("out.bed"), dir.0.join("out_read.txt")];
+            for path in &existing {
+                fs::write(path, "previous successful result\n").unwrap();
+            }
+            let sam = if failure == "sam" {
+                dir.0.join("missing.sam")
+            } else {
+                golden.join("gmap_test.sam")
+            };
+            let fasta = if failure == "fasta" {
+                dir.0.join("missing.fa")
+            } else {
+                golden.join("test_genome.fa")
+            };
+            let output = Command::new(env!("CARGO_BIN_EXE_braid"))
+                .args(["tama-collapse", "--rm", mode, "-x"])
+                .arg(if failure == "cap" {
+                    "invalid"
+                } else {
+                    "capped"
+                })
+                .arg("-s")
+                .arg(sam)
+                .arg("-f")
+                .arg(fasta)
+                .arg("-p")
+                .arg(prefix)
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(1), "{mode}/{failure}");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let expected = match failure {
+                "cap" => "-x must be capped or no_cap",
+                "sam" => "missing.sam",
+                _ => "missing.fa",
+            };
+            assert!(stderr.contains(expected), "{mode}/{failure}: {stderr}");
+            for path in &existing {
+                assert_eq!(
+                    fs::read_to_string(path).unwrap(),
+                    "previous successful result\n",
+                    "{mode}/{failure}: {}",
+                    path.display(),
+                );
+            }
+            assert_eq!(fs::read_dir(&dir.0).unwrap().count(), existing.len());
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn flair_output_preserves_non_utf8_paths() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let dir = WorkDir::new();
+    let input = parity().join("flair_combine/official/in");
+    let manifest = dir.0.join("manifest.tsv");
+    fs::write(
+        &manifest,
+        format!(
+            "A1\tisoforms\t{}\t{}\t{}\n",
+            input.join("collapse.isoforms.bed").display(),
+            input.join("collapse.isoforms.fa").display(),
+            input.join("collapse.isoform.read.map.txt").display(),
+        ),
+    )
+    .unwrap();
+    let ascii_dir = dir.0.join("ascii");
+    let native_dir = dir.0.join(OsString::from_vec(b"native-\xff".to_vec()));
+    for output_dir in [&ascii_dir, &native_dir] {
+        let output = Command::new(env!("CARGO_BIN_EXE_braid"))
+            .args(["flair-combine", "-c", "-m"])
+            .arg(&manifest)
+            .arg("-o")
+            .arg(output_dir.join("combined"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    for suffix in [".bed", ".counts.tsv", ".isoform.map.txt", ".fa", ".gtf"] {
+        let name = format!("combined{suffix}");
+        assert_eq!(
+            fs::read(native_dir.join(&name)).unwrap(),
+            fs::read(ascii_dir.join(&name)).unwrap(),
+            "{name}",
+        );
+    }
+    assert_eq!(fs::read_dir(&native_dir).unwrap().count(), 5);
+}
+
+#[test]
 fn merge_is_available_and_legacy_cds_reaches_input_validation() {
     let output = run(&[
         "tama-merge",

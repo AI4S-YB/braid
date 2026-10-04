@@ -7,9 +7,10 @@
 //! A chain that fails the filter still names its map entry from `theseisos`
 //! left behind by the previous chain, including a filtered chain.
 
+use braid_io::suffix_path;
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Clone, Debug)]
 pub struct CombineSettings {
@@ -168,10 +169,9 @@ pub fn combine(manifest: &Path, settings: &CombineSettings) -> Result<CombineTex
             continue;
         }
 
-        let mut end_count = 1i64;
-        for group in &groups {
+        for (end_count, group) in (1i64..).zip(&groups) {
             let mut members = group.members.clone();
-            members.sort_by(|a, b| (b.end - b.start).cmp(&(a.end - a.start)));
+            members.sort_by_key(|iso| std::cmp::Reverse(iso.end - iso.start));
             let max_usage = members
                 .iter()
                 .map(|iso| iso.usage)
@@ -229,7 +229,6 @@ pub fn combine(manifest: &Path, settings: &CombineSettings) -> Result<CombineTex
                 &members,
             );
             last_members = Some(members);
-            end_count += 1;
         }
         iso_count += 1;
     }
@@ -274,18 +273,14 @@ pub fn combine(manifest: &Path, settings: &CombineSettings) -> Result<CombineTex
 }
 
 pub fn write_combine_texts(prefix: &Path, texts: &CombineTexts) -> Result<(), String> {
-    let base = prefix.as_os_str().to_string_lossy();
-    write_one(&PathBuf::from(format!("{base}.bed")), &texts.bed)?;
-    write_one(&PathBuf::from(format!("{base}.counts.tsv")), &texts.counts)?;
-    write_one(
-        &PathBuf::from(format!("{base}.isoform.map.txt")),
-        &texts.isoform_map,
-    )?;
+    write_one(&suffix_path(prefix, ".bed"), &texts.bed)?;
+    write_one(&suffix_path(prefix, ".counts.tsv"), &texts.counts)?;
+    write_one(&suffix_path(prefix, ".isoform.map.txt"), &texts.isoform_map)?;
     if let Some(fa) = &texts.fasta {
-        write_one(&PathBuf::from(format!("{base}.fa")), fa)?;
+        write_one(&suffix_path(prefix, ".fa"), fa)?;
     }
     if let Some(gtf) = &texts.gtf {
-        write_one(&PathBuf::from(format!("{base}.gtf")), gtf)?;
+        write_one(&suffix_path(prefix, ".gtf"), gtf)?;
     }
     Ok(())
 }
@@ -442,7 +437,16 @@ fn read_isoform_bed(
             continue;
         }
         let cols: Vec<&str> = line.split('\t').collect();
-        let (chrom, start, end, name, strand, exons, sizes, rels) = bed_fields(&cols, path)?;
+        let BedFields {
+            chrom,
+            start,
+            end,
+            name,
+            strand,
+            exons,
+            sizes,
+            rels,
+        } = bed_fields(&cols, path)?;
         let mut keep_name = name.to_string();
         let body = if exons > 1 {
             ChainBody::Introns(intron_chain(start, &sizes, &rels))
@@ -487,7 +491,16 @@ fn read_fusion_bed(
             continue;
         }
         let cols: Vec<&str> = line.split('\t').collect();
-        let (chrom, start, end, name, strand, exons, sizes, rels) = bed_fields(&cols, path)?;
+        let BedFields {
+            chrom,
+            start,
+            end,
+            name,
+            strand,
+            exons,
+            sizes,
+            rels,
+        } = bed_fields(&cols, path)?;
         let stripped = name.split('_').skip(1).collect::<Vec<_>>().join("_");
         let body = if exons > 1 {
             ChainBody::Introns(intron_chain(start, &sizes, &rels))
@@ -515,28 +528,24 @@ fn read_fusion_bed(
             continue;
         }
         let fusion_start = if loci[0].strand == "+" {
-            let value = loci[0]
+            loci[0]
                 .start
                 .take()
-                .ok_or("fusion locus is missing a start")?;
-            value
+                .ok_or("fusion locus is missing a start")?
         } else {
-            let value = loci[0].end.take().ok_or("fusion locus is missing an end")?;
-            value
+            loci[0].end.take().ok_or("fusion locus is missing an end")?
         };
         let last = loci.len() - 1;
         let fusion_end = if loci[last].strand == "+" {
-            let value = loci[last]
+            loci[last]
                 .end
                 .take()
-                .ok_or("fusion locus is missing an end")?;
-            value
+                .ok_or("fusion locus is missing an end")?
         } else {
-            let value = loci[last]
+            loci[last]
                 .start
                 .take()
-                .ok_or("fusion locus is missing a start")?;
-            value
+                .ok_or("fusion locus is missing a start")?
         };
         let (usage, counts) = usage_of(support, &name)?;
         let stored = clean_iso_name(&name);
@@ -555,10 +564,18 @@ fn read_fusion_bed(
     Ok(out)
 }
 
-fn bed_fields<'a>(
-    cols: &'a [&str],
-    path: &Path,
-) -> Result<(&'a str, i64, i64, &'a str, &'a str, i64, Vec<i64>, Vec<i64>), String> {
+struct BedFields<'a> {
+    chrom: &'a str,
+    start: i64,
+    end: i64,
+    name: &'a str,
+    strand: &'a str,
+    exons: i64,
+    sizes: Vec<i64>,
+    rels: Vec<i64>,
+}
+
+fn bed_fields<'a>(cols: &'a [&str], path: &Path) -> Result<BedFields<'a>, String> {
     if cols.len() < 12 {
         return Err(format!(
             "{} has a BED row with {} columns; FLAIR combine needs 12",
@@ -571,7 +588,16 @@ fn bed_fields<'a>(
     let exons = parse_i64(cols[9], path)?;
     let sizes = parse_csv_i64(cols[10], path)?;
     let rels = parse_csv_i64(cols[11], path)?;
-    Ok((cols[0], start, end, cols[3], cols[5], exons, sizes, rels))
+    Ok(BedFields {
+        chrom: cols[0],
+        start,
+        end,
+        name: cols[3],
+        strand: cols[5],
+        exons,
+        sizes,
+        rels,
+    })
 }
 
 fn intron_chain(start: i64, sizes: &[i64], rels: &[i64]) -> Vec<(i64, i64)> {
@@ -741,8 +767,7 @@ fn write_bed(out: &mut String, chain: &ChainId, rep: &Iso, name: &str) -> Result
                 push_bed_line(
                     out,
                     &locus.chrom,
-                    start,
-                    end,
+                    (start, end),
                     &locus_name,
                     &locus.strand,
                     &sizes,
@@ -759,7 +784,15 @@ fn write_bed(out: &mut String, chain: &ChainId, rep: &Iso, name: &str) -> Result
                 ChainBody::Single(_) => (vec![rep.end - rep.start], vec![0]),
                 ChainBody::Introns(introns) => exon_blocks(introns, rep.start, rep.end),
             };
-            push_bed_line(out, chrom, rep.start, rep.end, name, strand, &sizes, &rels);
+            push_bed_line(
+                out,
+                chrom,
+                (rep.start, rep.end),
+                name,
+                strand,
+                &sizes,
+                &rels,
+            );
         }
     }
     Ok(())
@@ -779,8 +812,7 @@ fn exon_blocks(introns: &[(i64, i64)], start: i64, end: i64) -> (Vec<i64>, Vec<i
 fn push_bed_line(
     out: &mut String,
     chrom: &str,
-    start: i64,
-    end: i64,
+    (start, end): (i64, i64),
     name: &str,
     strand: &str,
     sizes: &[i64],
@@ -988,7 +1020,7 @@ fn bed_to_gtf(bed: &str) -> Result<String, String> {
         let thick_end: i64 = cols[7]
             .parse()
             .map_err(|_| format!("bad thick end {}", cols[7]))?;
-        let mut name = cols[3].replace(';', ":");
+        let name = cols[3].replace(';', ":");
         if !name.contains('_') {
             return Err(
                 "Entry name should contain underscore-delimited transcriptid and geneid; no GTF conversion was done"
@@ -996,8 +1028,6 @@ fn bed_to_gtf(bed: &str) -> Result<String, String> {
             );
         }
         let (transcript_id, gene_id) = split_iso_gene(&name);
-        name = transcript_id;
-        let transcript_id = name;
         let attributes = format!("gene_id \"{gene_id}\"; transcript_id \"{transcript_id}\";");
         let rels = parse_csv_i64(cols[11], Path::new("combined.bed"))?;
         let sizes = parse_csv_i64(cols[10], Path::new("combined.bed"))?;
@@ -1134,6 +1164,7 @@ fn split_iso_gene(name: &str) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/parity/flair_combine")

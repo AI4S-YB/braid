@@ -10,6 +10,7 @@
 use braid_model::{Exon, Strand, Transcript};
 use std::collections::{BTreeMap, HashMap};
 
+use crate::ids::{keys, reinsert, GeneGroups};
 use crate::py27::Py27Dict;
 use crate::py2float::py2_str_round;
 use crate::{coverage_percent, identity_percent};
@@ -166,22 +167,19 @@ impl Merged {
                 self.trans_id.split('.').next().unwrap_or(""),
                 self.trans_id
             ),
-            self.start_pos,
-            self.end_pos,
+            (self.start_pos, self.end_pos),
             &self.collapse_starts,
             &self.collapse_ends,
             self.num_exons,
         )
     }
 
-    fn read_bed_line(&self, read: &ReadModel, final_trans_id: &str) -> Result<String, String> {
-        let _ = self;
+    fn read_bed_line(read: &ReadModel, final_trans_id: &str) -> Result<String, String> {
         Self::bed_blocks(
             &read.scaff,
             &read.strand,
             &format!("{final_trans_id};{}", read.cluster_id),
-            read.start_pos,
-            read.end_pos,
+            (read.start_pos, read.end_pos),
             &read.exon_starts,
             &read.exon_ends,
             read.num_exons(),
@@ -192,8 +190,7 @@ impl Merged {
         scaff: &str,
         strand: &str,
         name: &str,
-        start_pos: i64,
-        end_pos: i64,
+        (start_pos, end_pos): (i64, i64),
         starts: &[i64],
         ends: &[i64],
         num_exons: usize,
@@ -634,7 +631,7 @@ fn vote(
         .entry(priority)
         .or_default()
         .entry(coord)
-        .or_insert_with(Py27Dict::new)
+        .or_default()
         .insert(error, 1);
     range.push(coord);
 }
@@ -841,8 +838,8 @@ impl TransGroup {
                 "groups for {trans_a} and {trans_b} are already the same"
             ));
         }
-        let a_members = string_keys(self.group_trans.get(&a_group).ok_or("missing group A")?);
-        let b_members = string_keys(self.group_trans.get(&b_group).ok_or("missing group B")?);
+        let a_members = keys(self.group_trans.get(&a_group).ok_or("missing group A")?);
+        let b_members = keys(self.group_trans.get(&b_group).ok_or("missing group B")?);
         let (keep, drop, incoming) = if a_members.len() > b_members.len() {
             (a_group, b_group, b_members)
         } else {
@@ -863,10 +860,6 @@ impl TransGroup {
     }
 }
 
-fn string_keys(dict: &Py27Dict<String, i32>) -> Vec<String> {
-    dict.iter().map(|(key, _)| key.clone()).collect()
-}
-
 fn simplify_capped(
     reads: &[ReadModel],
     params: &GroupParams,
@@ -885,7 +878,7 @@ fn simplify_capped(
 
     while ungrouped_count > 0 {
         if unsearched_count == 0 {
-            let mut ids = string_keys_unit(&ungrouped);
+            let mut ids = keys(&ungrouped);
             ids.sort();
             hunter_id = ids
                 .into_iter()
@@ -897,7 +890,7 @@ fn simplify_capped(
         }
         while unsearched_count > 0 && ungrouped_count > 0 {
             if hunter_id == "new_hunter" {
-                let mut ids = string_keys_unit(&unsearched);
+                let mut ids = keys(&unsearched);
                 ids.sort();
                 hunter_id = ids
                     .into_iter()
@@ -912,7 +905,7 @@ fn simplify_capped(
             if !groups.has_trans(&hunter_id) {
                 groups.new_group(&hunter_id)?;
             }
-            let prey_ids = string_keys_unit(&ungrouped);
+            let prey_ids = keys(&ungrouped);
             for prey_id in prey_ids {
                 if prey_id == hunter_id {
                     continue;
@@ -934,7 +927,7 @@ fn simplify_capped(
                     unsearched.insert(prey_id, 1);
                 }
             }
-            for id in string_keys_unit(&unsearched) {
+            for id in keys(&unsearched) {
                 ungrouped.remove(&id);
             }
             unsearched_count = unsearched.len();
@@ -996,14 +989,6 @@ fn same_nocap(a: &ReadModel, b: &ReadModel, p: &GroupParams) -> bool {
     true
 }
 
-fn reinsert_ids(ids: &Py27Dict<String, i32>) -> Py27Dict<String, i32> {
-    let mut out = Py27Dict::new();
-    for (id, _) in ids.iter() {
-        out.insert(id.clone(), 1);
-    }
-    out
-}
-
 fn simplify_nocap(
     reads: &[ReadModel],
     p: &GroupParams,
@@ -1021,7 +1006,7 @@ fn simplify_nocap(
     let mut degraded = std::collections::HashSet::new();
     let mut pending: Py27Dict<String, i32> = Py27Dict::new();
     for (&level, ids) in levels.iter().rev() {
-        let mut ungrouped = reinsert_ids(ids);
+        let mut ungrouped = reinsert(ids);
         while !ungrouped.is_empty() {
             let mut by_five: BTreeMap<i64, Py27Dict<String, i32>> = BTreeMap::new();
             for (id, _) in ungrouped.iter() {
@@ -1065,7 +1050,7 @@ fn simplify_nocap(
                     }
                 }
                 for (_, smaller) in levels.range(..level).rev() {
-                    let candidates = reinsert_ids(smaller);
+                    let candidates = reinsert(smaller);
                     for (prey, _) in candidates.iter() {
                         if !groups.has_trans(prey) {
                             groups.new_group(prey)?;
@@ -1078,7 +1063,7 @@ fn simplify_nocap(
                         }
                     }
                 }
-                let mut queued = string_keys(&pending);
+                let mut queued = keys(&pending);
                 queued.sort();
                 let Some(next) = queued.first() else {
                     break;
@@ -1091,21 +1076,40 @@ fn simplify_nocap(
     Ok(groups.group_trans)
 }
 
-fn string_keys_unit(dict: &Py27Dict<String, i32>) -> Vec<String> {
-    dict.iter().map(|(key, _)| key.clone()).collect()
+/// Only the geometry needed for exon-overlap grouping, borrowed from either
+/// a collapsed read or a merge model. Coordinates remain algorithm-local.
+pub(crate) struct TranscriptGeometry<'a> {
+    pub id: &'a str,
+    pub starts: &'a [i64],
+    pub ends: &'a [i64],
+}
+
+pub(crate) trait GroupedTranscript {
+    fn geometry(&self) -> TranscriptGeometry<'_>;
+}
+
+impl GroupedTranscript for ReadModel {
+    fn geometry(&self) -> TranscriptGeometry<'_> {
+        TranscriptGeometry {
+            id: &self.cluster_id,
+            starts: &self.exon_starts,
+            ends: &self.exon_ends,
+        }
+    }
 }
 
 /// Group one strand. Returned transcript ids under each start are in the
 /// dict order `process_loci` later walks.
-pub(crate) fn gene_group(
+pub(crate) fn gene_group<T: GroupedTranscript>(
     trans_ids: &[String],
-    reads: &HashMap<String, ReadModel>,
-) -> Result<(Py27Dict<i64, Py27Dict<String, i32>>, Vec<i64>), String> {
-    let models: Vec<&ReadModel> = trans_ids
+    reads: &HashMap<String, T>,
+) -> Result<(GeneGroups, Vec<i64>), String> {
+    let models: Vec<TranscriptGeometry<'_>> = trans_ids
         .iter()
         .map(|id| {
             reads
                 .get(id)
+                .map(GroupedTranscript::geometry)
                 .ok_or_else(|| format!("missing transcript {id}"))
         })
         .collect::<Result<_, _>>()?;
@@ -1116,8 +1120,8 @@ pub(crate) fn gene_group(
 
     if models.len() == 1 {
         gene_count += 1;
-        let id = models[0].cluster_id.clone();
-        let start = models[0].exon_starts[0];
+        let id = models[0].id.to_string();
+        let start = models[0].starts[0];
         gene_start.insert(gene_count, start);
         gene_trans
             .or_insert_with(gene_count, Py27Dict::new)
@@ -1127,10 +1131,10 @@ pub(crate) fn gene_group(
 
     for i in 0..models.len() {
         for j in (i + 1)..models.len() {
-            let left = models[i];
-            let right = models[j];
-            let left_id = &left.cluster_id;
-            let right_id = &right.cluster_id;
+            let left = &models[i];
+            let right = &models[j];
+            let left_id = left.id;
+            let right_id = right.id;
             if let (Some(gene), Some(other)) = (trans_gene.get(left_id), trans_gene.get(right_id)) {
                 if gene == other {
                     continue;
@@ -1140,49 +1144,49 @@ pub(crate) fn gene_group(
             if !overlap {
                 if !trans_gene.contains_key(left_id) {
                     gene_count += 1;
-                    trans_gene.insert(left_id.clone(), gene_count);
+                    trans_gene.insert(left_id.to_string(), gene_count);
                     gene_trans
                         .or_insert_with(gene_count, Py27Dict::new)
-                        .insert(left_id.clone(), 1);
-                    gene_start.insert(gene_count, left.exon_starts[0]);
+                        .insert(left_id.to_string(), 1);
+                    gene_start.insert(gene_count, left.starts[0]);
                 }
                 if !trans_gene.contains_key(right_id) {
                     gene_count += 1;
-                    trans_gene.insert(right_id.clone(), gene_count);
+                    trans_gene.insert(right_id.to_string(), gene_count);
                     gene_trans
                         .or_insert_with(gene_count, Py27Dict::new)
-                        .insert(right_id.clone(), 1);
-                    gene_start.insert(gene_count, right.exon_starts[0]);
+                        .insert(right_id.to_string(), 1);
+                    gene_start.insert(gene_count, right.starts[0]);
                 }
             } else if !trans_gene.contains_key(left_id) && !trans_gene.contains_key(right_id) {
                 gene_count += 1;
-                trans_gene.insert(left_id.clone(), gene_count);
-                trans_gene.insert(right_id.clone(), gene_count);
+                trans_gene.insert(left_id.to_string(), gene_count);
+                trans_gene.insert(right_id.to_string(), gene_count);
                 let members = gene_trans.or_insert_with(gene_count, Py27Dict::new);
-                members.insert(left_id.clone(), 1);
-                members.insert(right_id.clone(), 1);
-                gene_start.insert(gene_count, left.exon_starts[0].min(right.exon_starts[0]));
+                members.insert(left_id.to_string(), 1);
+                members.insert(right_id.to_string(), 1);
+                gene_start.insert(gene_count, left.starts[0].min(right.starts[0]));
             } else if !trans_gene.contains_key(left_id) {
                 let gene_num = *trans_gene.get(right_id).unwrap();
-                trans_gene.insert(left_id.clone(), gene_num);
+                trans_gene.insert(left_id.to_string(), gene_num);
                 gene_trans
                     .get_mut(&gene_num)
                     .ok_or("missing gene while adding left transcript")?
-                    .insert(left_id.clone(), 1);
-                gene_start.insert(gene_num, left.exon_starts[0].min(right.exon_starts[0]));
+                    .insert(left_id.to_string(), 1);
+                gene_start.insert(gene_num, left.starts[0].min(right.starts[0]));
             } else if !trans_gene.contains_key(right_id) {
                 let gene_num = *trans_gene.get(left_id).unwrap();
-                trans_gene.insert(right_id.clone(), gene_num);
+                trans_gene.insert(right_id.to_string(), gene_num);
                 gene_trans
                     .get_mut(&gene_num)
                     .ok_or("missing gene while adding right transcript")?
-                    .insert(right_id.clone(), 1);
-                gene_start.insert(gene_num, left.exon_starts[0].min(right.exon_starts[0]));
+                    .insert(right_id.to_string(), 1);
+                gene_start.insert(gene_num, left.starts[0].min(right.starts[0]));
             } else {
                 let gene_num = *trans_gene.get(left_id).unwrap();
                 let other_num = *trans_gene.get(right_id).unwrap();
                 if gene_num != other_num {
-                    let moving = string_keys(
+                    let moving = keys(
                         gene_trans
                             .get(&other_num)
                             .ok_or("missing gene during merge")?,
@@ -1229,9 +1233,9 @@ pub(crate) fn gene_group(
     Ok((by_start, starts))
 }
 
-fn exons_overlap(left: &ReadModel, right: &ReadModel) -> bool {
-    for (a_start, a_end) in left.exon_starts.iter().zip(&left.exon_ends) {
-        for (b_start, b_end) in right.exon_starts.iter().zip(&right.exon_ends) {
+fn exons_overlap(left: &TranscriptGeometry<'_>, right: &TranscriptGeometry<'_>) -> bool {
+    for (a_start, a_end) in left.starts.iter().zip(left.ends) {
+        for (b_start, b_end) in right.starts.iter().zip(right.ends) {
             if *a_start <= *b_end && *a_end >= *b_start {
                 return true;
             }
@@ -1280,26 +1284,29 @@ fn sort_transcripts(models: Vec<Merged>, params: &GroupParams) -> Result<Vec<Mer
         model.collapse_starts.sort();
         model.collapse_ends.sort();
         let key = position_line(&model.collapse_starts, &model.collapse_ends)?;
-        if by_key.contains_key(&key) {
-            if params.duplicates != "merge_dup" {
-                return Err("duplicate collapsed models and -d is not merge_dup".to_string());
+        match by_key.entry(key) {
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                if params.duplicates != "merge_dup" {
+                    return Err("duplicate collapsed models and -d is not merge_dup".to_string());
+                }
+                let incoming: Vec<ReadModel> =
+                    model.reads.iter().map(|(_, read)| read.clone()).collect();
+                let survivor = entry.get_mut();
+                for read in incoming {
+                    survivor.add_read(read)?;
+                }
+                let members: Vec<ReadModel> = survivor
+                    .reads
+                    .iter()
+                    .map(|(_, read)| read.clone())
+                    .collect();
+                let collapsed = collapse_transcripts(&members, params)?;
+                survivor.apply(collapsed)?;
             }
-            let incoming: Vec<ReadModel> =
-                model.reads.iter().map(|(_, read)| read.clone()).collect();
-            let survivor = by_key.get_mut(&key).unwrap();
-            for read in incoming {
-                survivor.add_read(read)?;
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                keys.push(entry.key().clone());
+                entry.insert(model);
             }
-            let members: Vec<ReadModel> = survivor
-                .reads
-                .iter()
-                .map(|(_, read)| read.clone())
-                .collect();
-            let collapsed = collapse_transcripts(&members, params)?;
-            survivor.apply(collapsed)?;
-        } else {
-            keys.push(key.clone());
-            by_key.insert(key, model);
         }
     }
     let order = sort_position_keys(&keys)?;
@@ -1346,11 +1353,11 @@ fn iterate_sort(rows: &mut [(String, Vec<Tok>)], col: usize) -> Result<(), Strin
     let mut open: Option<usize> = None;
     for j in 1..rows.len() {
         if rows[j].1[col] == rows[j - 1].1[col] {
-            if open.is_none() {
+            if let Some(index) = open {
+                groups[index].push(j);
+            } else {
                 open = Some(groups.len());
                 groups.push(vec![j - 1, j]);
-            } else {
-                groups[*open.as_ref().unwrap()].push(j);
             }
         } else {
             open = None;
@@ -1519,7 +1526,7 @@ fn collapse_gene(
         });
         trans_report.push(merged.trans_report_line(&params.ident_method)?);
         for (_, read) in merged.reads.iter() {
-            trans_read.push(merged.read_bed_line(read, &final_id)?);
+            trans_read.push(Merged::read_bed_line(read, &final_id)?);
             let percent = read.a_percent * 100.0;
             if percent > 70.0 {
                 polya.push(format!(

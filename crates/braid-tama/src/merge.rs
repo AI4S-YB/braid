@@ -1,24 +1,15 @@
 //! Native TAMA merge, following tama_merge.py at 2fa3c308.
 //! BED coordinates stay zero-based here; shared Transcript coordinates are
 //! converted to 1-based only at the public API boundary.
-use crate::group::{gene_group, sort_position_keys, ReadModel};
+use crate::group::{gene_group, sort_position_keys, GroupedTranscript, TranscriptGeometry};
+use crate::ids::{keys, reinsert, Ids};
 use crate::Py27Dict;
+use braid_io::suffix_path;
 use braid_model::{Exon, MergeSource, Strand, Transcript};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
-type Ids = Py27Dict<String, i32>;
-fn keys(ids: &Ids) -> Vec<String> {
-    ids.iter().map(|(k, _)| k.clone()).collect()
-}
-fn reinsert(ids: &Ids) -> Ids {
-    let mut d = Ids::new();
-    for (k, _) in ids.iter() {
-        d.insert(k.clone(), 1);
-    }
-    d
-}
 fn ints(v: &[i64]) -> String {
     v.iter()
         .map(ToString::to_string)
@@ -79,26 +70,14 @@ impl Model {
     fn n(&self) -> usize {
         self.starts.len()
     }
-    fn geometry(&self) -> ReadModel {
-        ReadModel {
-            cluster_id: self.id.clone(),
-            scaff: self.chrom.clone(),
-            strand: self.strand.clone(),
-            start_pos: self.start,
-            end_pos: self.end,
-            exon_starts: self.starts.clone(),
-            exon_ends: self.ends.clone(),
-            sj_pre: vec![],
-            sj_post: vec![],
-            seq_length: 0,
-            h_count: 0,
-            s_count: 0,
-            i_count: 0,
-            d_count: 0,
-            mis_count: 0,
-            polya_seq: String::new(),
-            a_count: 0,
-            a_percent: 0.0,
+}
+
+impl GroupedTranscript for Model {
+    fn geometry(&self) -> TranscriptGeometry<'_> {
+        TranscriptGeometry {
+            id: &self.id,
+            starts: &self.starts,
+            ends: &self.ends,
         }
     }
 }
@@ -577,16 +556,21 @@ fn collapse_groups(
         .collect()
 }
 
+struct BedStyle<'a> {
+    cds: (i64, i64),
+    colour: &'a str,
+}
+
 fn bed(
     chrom: &str,
     strand: &str,
     starts: &[i64],
     ends: &[i64],
     name: &str,
-    cds: (i64, i64),
-    colour: &str,
+    style: BedStyle<'_>,
     bounds: Option<(i64, i64)>,
 ) -> String {
+    let BedStyle { cds, colour } = style;
     let (start, end) = bounds.unwrap_or((starts[0], *ends.last().unwrap()));
     let sizes: Vec<_> = starts.iter().zip(ends).map(|(a, b)| b - a).collect();
     let rels: Vec<_> = starts.iter().map(|a| a - start).collect();
@@ -614,11 +598,23 @@ const COLOURS: [&str; 10] = [
 
 pub fn read_merge_sources(path: &Path) -> Result<Vec<MergeSource>, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    text.trim_end_matches('\n').split('\n').map(|line|{
-        let cols:Vec<_>=line.split('\t').collect();
-        if cols.len()!=4 || line.contains(['\r',' ']){return Err("merge filelist must have four tab-separated columns, without spaces or blank rows".into());}
-        Ok(MergeSource{path:cols[0].into(),cap:cols[1].into(),priority:cols[2].into(),name:cols[3].into()})
-    }).collect()
+    text.trim_end_matches('\n')
+        .split('\n')
+        .map(|line| {
+            let cols: Vec<_> = line.split('\t').collect();
+            if cols.len() != 4 || line.contains(['\r', ' ']) {
+                return Err(
+                    "merge filelist must have four tab-separated columns, without spaces or blank rows".into(),
+                );
+            }
+            Ok(MergeSource {
+                path: cols[0].into(),
+                cap: cols[1].into(),
+                priority: cols[2].into(),
+                name: cols[3].into(),
+            })
+        })
+        .collect()
 }
 
 pub fn merge_sources(sources: &[MergeSource], p: &MergeSettings) -> Result<MergeTexts, String> {
@@ -733,22 +729,20 @@ pub fn merge_sources(sources: &[MergeSource], p: &MergeSettings) -> Result<Merge
         }
         let locus = &rows[pos..stop];
         let mut all = HashMap::new();
-        let mut geometry = HashMap::new();
         let mut forward = Vec::new();
         let mut reverse = Vec::new();
         for m in locus {
             if all.insert(m.id.clone(), m.clone()).is_some() {
                 return Err(format!("duplicate source transcript {} in locus", m.id));
             }
-            geometry.insert(m.id.clone(), m.geometry());
             if m.strand == "+" {
                 forward.push(m.id.clone());
             } else {
                 reverse.push(m.id.clone());
             }
         }
-        let (fg, fs) = gene_group(&forward, &geometry)?;
-        let (rg, rs) = gene_group(&reverse, &geometry)?;
+        let (fg, fs) = gene_group(&forward, &all)?;
+        let (rg, rs) = gene_group(&reverse, &all)?;
         let starts: BTreeSet<_> = fs.into_iter().chain(rs).collect();
         for start in starts {
             for dict in [&fg, &rg] {
@@ -789,8 +783,10 @@ pub fn merge_sources(sources: &[MergeSource], p: &MergeSettings) -> Result<Merge
                                 &m.starts,
                                 &m.ends,
                                 &format!("{id};{mid}"),
-                                (m.start, m.end),
-                                "255,0,0",
+                                BedStyle {
+                                    cds: (m.start, m.end),
+                                    colour: "255,0,0",
+                                },
                                 Some((m.start, m.end)),
                             ));
                             let (source, trans) = mid.split_once('_').unwrap();
@@ -826,8 +822,7 @@ pub fn merge_sources(sources: &[MergeSource], p: &MergeSettings) -> Result<Merge
                             &c.starts,
                             &c.ends,
                             &name,
-                            cds,
-                            colour,
+                            BedStyle { cds, colour },
                             None,
                         ));
                         out.transcripts.push(Transcript {
@@ -899,9 +894,8 @@ pub fn write_merge_texts(prefix: &Path, texts: &MergeTexts) -> Result<(), String
         ("_gene_report.txt", &texts.gene_report),
         ("_merge.txt", &texts.merge),
     ] {
-        let mut path = prefix.as_os_str().to_os_string();
-        path.push(suffix);
-        fs::write(Path::new(&path), body).map_err(|e| format!("write {:?}: {e}", path))?;
+        let path = suffix_path(prefix, suffix);
+        fs::write(&path, body).map_err(|e| format!("write {}: {e}", path.display()))?;
     }
     Ok(())
 }

@@ -154,6 +154,23 @@ pub fn assemble(settings: &TacoSettings) -> Result<TacoTexts, TacoFailure> {
     aggregate(settings, &work, genome.as_ref(), &motifs)
 }
 
+#[derive(Default)]
+struct AssemblyIds {
+    gene: u64,
+    tss: u64,
+    transcript: u64,
+}
+
+#[derive(Default)]
+struct AssemblyOutput {
+    splice_lines: Vec<String>,
+    change_lines: Vec<String>,
+    path_lines: Vec<String>,
+    assembly_gtf: Vec<String>,
+    assembly_bed: Vec<String>,
+    transcripts: Vec<Transcript>,
+}
+
 fn aggregate(
     settings: &TacoSettings,
     work: &[Sample],
@@ -238,15 +255,8 @@ fn aggregate(
 
     let mut graphs = [Vec::new(), Vec::new(), Vec::new()];
     let mut junctions = Vec::new();
-    let mut splice_lines = Vec::new();
-    let mut change_lines = Vec::new();
-    let mut path_lines = Vec::new();
-    let mut assembly_gtf = Vec::new();
-    let mut assembly_bed = Vec::new();
-    let mut transcripts = Vec::new();
-    let mut gene_id = 0u64;
-    let mut tss_id = 0u64;
-    let mut transcript_id = 0u64;
+    let mut output = AssemblyOutput::default();
+    let mut ids = AssemblyIds::default();
 
     for locus in &loci {
         let group: Vec<Transfrag> = placed[locus.first..locus.first + locus.count]
@@ -284,15 +294,8 @@ fn aggregate(
                     &locus.name,
                     settings,
                     num_samples,
-                    &mut gene_id,
-                    &mut tss_id,
-                    &mut transcript_id,
-                    &mut splice_lines,
-                    &mut change_lines,
-                    &mut path_lines,
-                    &mut assembly_gtf,
-                    &mut assembly_bed,
-                    &mut transcripts,
+                    &mut ids,
+                    &mut output,
                 )?;
             }
         }
@@ -320,6 +323,14 @@ fn aggregate(
         ));
     }
 
+    let AssemblyOutput {
+        splice_lines,
+        change_lines,
+        path_lines,
+        assembly_gtf,
+        assembly_bed,
+        transcripts,
+    } = output;
     Ok(TacoTexts {
         transcripts,
         samples: samples_txt,
@@ -350,16 +361,22 @@ fn assemble_gene(
     locus_id: &str,
     settings: &TacoSettings,
     num_samples: usize,
-    gene_id: &mut u64,
-    tss_id: &mut u64,
-    transcript_id: &mut u64,
-    splice_lines: &mut Vec<String>,
-    change_lines: &mut Vec<String>,
-    path_lines: &mut Vec<String>,
-    assembly_gtf: &mut Vec<String>,
-    assembly_bed: &mut Vec<String>,
-    transcripts: &mut Vec<Transcript>,
+    ids: &mut AssemblyIds,
+    output: &mut AssemblyOutput,
 ) -> Result<(), TacoFailure> {
+    let AssemblyIds {
+        gene: gene_id,
+        tss: tss_id,
+        transcript: transcript_id,
+    } = ids;
+    let AssemblyOutput {
+        splice_lines,
+        change_lines,
+        path_lines,
+        assembly_gtf,
+        assembly_bed,
+        transcripts,
+    } = output;
     if settings.change_point {
         let points = graph.detect_change_points(
             settings.change_point_pvalue,
@@ -584,11 +601,11 @@ impl Locus {
         for &(start, end) in &transfrag.exons {
             let from = (start - self.start) as usize;
             let to = (end - self.start) as usize;
-            for strand in 0..2 {
+            for (strand, hit) in hit.iter_mut().enumerate() {
                 let covered = self.mask[strand][from..to].iter().any(|bit| *bit != 0)
                     || self.expr[strand][from..to].iter().any(|value| *value > 0.0);
                 if covered {
-                    hit[strand] = true;
+                    *hit = true;
                 }
             }
         }
@@ -1184,8 +1201,10 @@ mod tests {
         }
         let sample = dir.join("samples.tsv");
         fs::write(&sample, rows).unwrap();
-        let mut settings = TacoSettings::default();
-        settings.sample_file = sample;
+        let settings = TacoSettings {
+            sample_file: sample,
+            ..TacoSettings::default()
+        };
         (dir, settings)
     }
 

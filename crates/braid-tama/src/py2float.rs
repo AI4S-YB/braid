@@ -60,7 +60,7 @@ fn format_cents(cents: i64) -> String {
     let frac = cents % 100;
     let body = if frac == 0 {
         format!("{whole}.0")
-    } else if frac % 10 == 0 {
+    } else if frac.is_multiple_of(10) {
         format!("{whole}.{}", frac / 10)
     } else {
         format!("{whole}.{frac:02}")

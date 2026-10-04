@@ -9,7 +9,7 @@ pub struct CigarParts {
 }
 
 pub fn cigar_parts(cigar: &str) -> Result<CigarParts, String> {
-    let cigar = cigar.replace('=', "M").replace('X', "M");
+    let cigar = cigar.replace(['=', 'X'], "M");
     let op_blob: String = cigar
         .chars()
         .map(|c| if c.is_ascii_digit() { ' ' } else { c })

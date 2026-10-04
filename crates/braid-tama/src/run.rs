@@ -6,9 +6,9 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use braid_io::{alignment_reader, read_fasta, SamClass};
+use braid_io::{alignment_reader, read_fasta, suffix_path, AlignmentReader, SamClass};
 use braid_model::Transcript;
 
 use crate::group::{collapse_locus, GroupParams, ReadModel};
@@ -94,15 +94,24 @@ pub fn original_collapse(
     fasta_path: &Path,
     settings: &CollapseSettings,
 ) -> Result<CollapseTexts, String> {
-    collapse_internal(sam_path, fasta_path, settings, None)
+    let input = prepare_inputs(sam_path, fasta_path, settings)?;
+    collapse_internal(input, settings, None)
 }
 
-fn collapse_internal(
+struct PreparedCollapse {
+    genome: HashMap<String, String>,
+    records: AlignmentReader,
+    ses: char,
+}
+
+type CollapseSink<'a> = dyn FnMut(&CollapseTexts) -> Result<(), String> + 'a;
+
+// Validate settings and open inputs before any output file can be truncated.
+fn prepare_inputs(
     sam_path: &Path,
     fasta_path: &Path,
     settings: &CollapseSettings,
-    mut sink: Option<&mut dyn FnMut(&CollapseTexts) -> Result<(), String>>,
-) -> Result<CollapseTexts, String> {
+) -> Result<PreparedCollapse, String> {
     let low_mem = settings.run_mode == "low_mem";
     if !low_mem && settings.run_mode != "original" {
         return Err("-rm must be original or low_mem".to_string());
@@ -138,6 +147,24 @@ fn collapse_internal(
         genome.insert(record.id, record.seq);
     }
     let records = alignment_reader(sam_path, settings.bam == "BAM")?;
+    Ok(PreparedCollapse {
+        genome,
+        records,
+        ses,
+    })
+}
+
+fn collapse_internal(
+    input: PreparedCollapse,
+    settings: &CollapseSettings,
+    mut sink: Option<&mut CollapseSink<'_>>,
+) -> Result<CollapseTexts, String> {
+    let PreparedCollapse {
+        genome,
+        records,
+        ses,
+    } = input;
+    let low_mem = settings.run_mode == "low_mem";
     let params = GroupParams {
         capped: settings.cap == "capped",
         five_prime: settings.five_prime,
@@ -687,33 +714,38 @@ fn join_lines(lines: &[String]) -> String {
     text
 }
 
+impl CollapseTexts {
+    // One definition shared by collected and streaming output. Variant files
+    // are absent in low_mem mode; original mode emits their headers even empty.
+    fn files(&self) -> [(&'static str, &str); 10] {
+        [
+            (".bed", &self.bed),
+            ("_read.txt", &self.read_txt),
+            ("_trans_report.txt", &self.trans_report),
+            ("_trans_read.bed", &self.trans_read),
+            ("_polya.txt", &self.polya),
+            ("_strand_check.txt", &self.strand_check),
+            ("_local_density_error.txt", &self.local_density),
+            ("_variants.txt", &self.variants),
+            ("_varcov.txt", &self.varcov),
+            ("_report.txt", &self.report),
+        ]
+    }
+}
+
+fn is_variant_file(suffix: &str) -> bool {
+    matches!(suffix, "_variants.txt" | "_varcov.txt")
+}
+
 pub fn write_collapse_texts(prefix: &Path, texts: &CollapseTexts) -> Result<(), String> {
-    let files = [
-        (".bed", &texts.bed),
-        ("_read.txt", &texts.read_txt),
-        ("_trans_report.txt", &texts.trans_report),
-        ("_trans_read.bed", &texts.trans_read),
-        ("_polya.txt", &texts.polya),
-        ("_strand_check.txt", &texts.strand_check),
-        ("_local_density_error.txt", &texts.local_density),
-        ("_variants.txt", &texts.variants),
-        ("_varcov.txt", &texts.varcov),
-        ("_report.txt", &texts.report),
-    ];
-    for (suffix, body) in files {
-        if (suffix == "_variants.txt" || suffix == "_varcov.txt") && body.is_empty() {
+    for (suffix, body) in texts.files() {
+        if is_variant_file(suffix) && body.is_empty() {
             continue;
         }
         let path = suffix_path(prefix, suffix);
         fs::write(&path, body).map_err(|err| format!("write {}: {err}", path.display()))?;
     }
     Ok(())
-}
-
-fn suffix_path(prefix: &Path, suffix: &str) -> PathBuf {
-    let mut name = prefix.as_os_str().to_os_string();
-    name.push(suffix);
-    PathBuf::from(name)
 }
 
 /// Write incrementally. low_mem retains only the current locus and genome.
@@ -724,21 +756,11 @@ pub fn collapse_to_files(
     settings: &CollapseSettings,
 ) -> Result<(), String> {
     use std::io::{BufWriter, Write};
+    let input = prepare_inputs(sam, fasta, settings)?;
+    let low_mem = settings.run_mode == "low_mem";
     let mut files = Vec::new();
-    for suffix in [
-        ".bed",
-        "_read.txt",
-        "_trans_report.txt",
-        "_trans_read.bed",
-        "_polya.txt",
-        "_strand_check.txt",
-        "_local_density_error.txt",
-        "_variants.txt",
-        "_varcov.txt",
-        "_report.txt",
-    ] {
-        if settings.run_mode == "low_mem" && (suffix == "_variants.txt" || suffix == "_varcov.txt")
-        {
+    for (suffix, _) in CollapseTexts::default().files() {
+        if low_mem && is_variant_file(suffix) {
             continue;
         }
         let path = suffix_path(prefix, suffix);
@@ -746,25 +768,17 @@ pub fn collapse_to_files(
         files.push((suffix, BufWriter::new(f)));
     }
     let mut emit = |texts: &CollapseTexts| -> Result<(), String> {
-        for (suffix, f) in &mut files {
-            let body = match *suffix {
-                ".bed" => &texts.bed,
-                "_read.txt" => &texts.read_txt,
-                "_trans_report.txt" => &texts.trans_report,
-                "_trans_read.bed" => &texts.trans_read,
-                "_polya.txt" => &texts.polya,
-                "_strand_check.txt" => &texts.strand_check,
-                "_local_density_error.txt" => &texts.local_density,
-                "_variants.txt" => &texts.variants,
-                "_varcov.txt" => &texts.varcov,
-                _ => &texts.report,
-            };
-            f.write_all(body.as_bytes())
+        let bodies = texts
+            .files()
+            .into_iter()
+            .filter(|(suffix, _)| !low_mem || !is_variant_file(suffix));
+        for ((suffix, body), (_, file)) in bodies.zip(&mut files) {
+            file.write_all(body.as_bytes())
                 .map_err(|e| format!("write {suffix}: {e}"))?;
         }
         Ok(())
     };
-    collapse_internal(sam, fasta, settings, Some(&mut emit))?;
+    collapse_internal(input, settings, Some(&mut emit))?;
     for (suffix, f) in &mut files {
         f.flush().map_err(|e| format!("flush {suffix}: {e}"))?;
     }

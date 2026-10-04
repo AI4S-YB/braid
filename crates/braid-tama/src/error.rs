@@ -50,12 +50,18 @@ fn slice_ascii(text: &str, start: i64, end: i64) -> Result<&str, String> {
     Ok(&text[start as usize..end as usize])
 }
 
+struct Mismatches {
+    genome: Vec<i64>,
+    query: Vec<i64>,
+    nucleotides: Vec<String>,
+}
+
 fn mismatch_seq(
     genome: &str,
     query: &str,
     genome_pos: i64,
     seq_pos: i64,
-) -> Result<(Vec<i64>, Vec<i64>, Vec<String>), String> {
+) -> Result<Mismatches, String> {
     if genome.len() != query.len() {
         return Err(format!(
             "Genome seq is not the same length as query seq ({genome_pos} {seq_pos})"
@@ -73,15 +79,25 @@ fn mismatch_seq(
             nuc_mismatches.push(format!("{}.{}", query_bytes[i] as char, genome[i] as char));
         }
     }
-    Ok((genome_mismatches, seq_mismatches, nuc_mismatches))
+    Ok(Mismatches {
+        genome: genome_mismatches,
+        query: seq_mismatches,
+        nucleotides: nuc_mismatches,
+    })
 }
+
+/// Read IDs supporting one observed sequence.
+pub type ReadSupport = Py27Dict<String, i32>;
+/// Observed sequence -> supporting reads.
+pub type SequenceSupport = Py27Dict<String, ReadSupport>;
+/// CIGAR/error kind -> sequence support at a genomic position.
+pub type VariantKinds = Py27Dict<String, SequenceSupport>;
 
 /// `variation_dict` and `var_coverage_dict`. Nested maps use CPython 2.7 order.
 #[derive(Clone, Debug)]
 pub struct VariationBook {
-    pub sites:
-        Py27Dict<String, Py27Dict<i64, Py27Dict<String, Py27Dict<String, Py27Dict<String, i32>>>>>,
-    pub coverage: Py27Dict<String, Py27Dict<i64, Py27Dict<String, i32>>>,
+    pub sites: Py27Dict<String, Py27Dict<i64, VariantKinds>>,
+    pub coverage: Py27Dict<String, Py27Dict<i64, ReadSupport>>,
 }
 
 impl VariationBook {
@@ -178,6 +194,10 @@ pub fn identity_percent(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "preserve the existing public API"
+)]
 pub fn calc_error_rate(
     start_pos: i64,
     cigar: &str,
@@ -232,8 +252,11 @@ pub fn calc_error_rate(
             "M" => {
                 let seq_slice = slice_ascii(seq, seq_pos, seq_pos + len)?;
                 let genome_slice = slice_ascii(genome, genome_pos, genome_pos + len)?;
-                let (genome_mm, seq_mm, nuc_mm) =
-                    mismatch_seq(genome_slice, seq_slice, genome_pos, seq_pos)?;
+                let Mismatches {
+                    genome: genome_mm,
+                    query: seq_mm,
+                    nucleotides: nuc_mm,
+                } = mismatch_seq(genome_slice, seq_slice, genome_pos, seq_pos)?;
                 mis_count += genome_mm.len() as i64;
                 for index in 0..seq_mm.len() {
                     let var_seq = (seq.as_bytes()[seq_mm[index] as usize] as char).to_string();
@@ -277,10 +300,14 @@ pub fn calc_error_rate(
                     &ops,
                     &lens,
                     i,
-                    genome_pos,
-                    seq,
-                    seq_pos,
-                    genome,
+                    SequenceCursor {
+                        sequence: seq,
+                        position: seq_pos,
+                    },
+                    SequenceCursor {
+                        sequence: genome,
+                        position: genome_pos,
+                    },
                     sj_err_threshold,
                 )?;
                 sj_pre.push(pre);
@@ -383,16 +410,27 @@ fn scan_pre(
     builder.join("_")
 }
 
+struct SequenceCursor<'a> {
+    sequence: &'a str,
+    position: i64,
+}
+
 fn scan_post(
     ops: &[String],
     lens: &[i64],
     n_index: usize,
-    genome_pos: i64,
-    seq: &str,
-    seq_pos: i64,
-    genome: &str,
+    query: SequenceCursor<'_>,
+    reference: SequenceCursor<'_>,
     sj_err_threshold: i64,
 ) -> Result<String, String> {
+    let SequenceCursor {
+        sequence: seq,
+        position: seq_pos,
+    } = query;
+    let SequenceCursor {
+        sequence: genome,
+        position: genome_pos,
+    } = reference;
     let mut next_index = n_index + 1;
     let mut next_flag = ops[next_index].clone();
     let mut next_len = lens[next_index];
@@ -409,8 +447,11 @@ fn scan_post(
         if next_flag == "M" {
             let seq_slice = slice_ascii(seq, seq_cursor, seq_cursor + next_len)?;
             let genome_slice = slice_ascii(genome, genome_cursor, genome_cursor + next_len)?;
-            let (genome_mm, _seq_mm, nuc_mm) =
-                mismatch_seq(genome_slice, seq_slice, genome_cursor, seq_cursor)?;
+            let Mismatches {
+                genome: genome_mm,
+                nucleotides: nuc_mm,
+                ..
+            } = mismatch_seq(genome_slice, seq_slice, genome_cursor, seq_cursor)?;
             if genome_mm.is_empty() {
                 if next_total <= sj_err_threshold {
                     builder.push(format!("{next_len}{next_flag}"));
