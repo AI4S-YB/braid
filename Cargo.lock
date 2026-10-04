@@ -54,7 +54,7 @@ dependencies = [
 
 [[package]]
 name = "braid-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "braid-flair",
  "braid-model",
@@ -65,22 +65,22 @@ dependencies = [
 
 [[package]]
 name = "braid-flair"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "braid-io"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "braid-model",
 ]
 
 [[package]]
 name = "braid-model"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "braid-taco"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "braid-io",
  "braid-model",
@@ -88,7 +88,7 @@ dependencies = [
 
 [[package]]
 name = "braid-tama"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "braid-io",
  "braid-model",

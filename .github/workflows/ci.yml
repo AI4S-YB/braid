@@ -117,7 +117,16 @@ jobs:
           - Linux x86_64（glibc）：\`braid-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz\`，解压后是 \`braid\`
           - Windows x86_64（MSVC）：\`braid-${GITHUB_REF_NAME}-x86_64-pc-windows-msvc.zip\`，解压后是 \`braid.exe\`
 
-          本版包含 TAMA collapse、TAMA merge 和 FLAIR combine。许可证 GPL-3.0-only。
+          本版包含 TAMA collapse、TAMA merge、FLAIR combine 和 TACO meta-assembly。许可证 GPL-3.0-only。
+
+          更新内容：
+
+          - 完成 TAMA merge，支持来源优先级、capped/no_cap 混合、重复模型处理及来源 ID/CDS 保留。
+          - TAMA collapse 新增 no_cap、low_mem 和 BAM 支持，并兼容原版单横线参数。
+          - 新增与 tacorna/taco 0.7.3 对照的 TACO meta-assembly。
+          - 修复 FLAIR 连续过滤映射、混合 FASTA 输入和 FASTA 空行处理。
+          - 扩充算法对照、命令行兼容性和 BAM 回归测试。
+
           TAMA collapse 支持 capped/no_cap、original/low_mem 和 SAM/BAM；读取 BAM 需要在 PATH 中安装 samtools。
           Linux 包在 GitHub 的 Ubuntu 运行器上编译，需要与该系统相近的 glibc。
           EOF
