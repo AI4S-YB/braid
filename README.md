@@ -2,7 +2,7 @@
 
 Build full-length transcriptomes, merge those annotations, and quantify single cells.
 
-`plena discover` pools a genome BAM into one transcriptome. `plena merge`, `plena flair-combine`, `plena taco`, and `plena stringtie-merge` combine GTF or BED annotations. `plena quant` counts molecules per cell from a barcode-tagged BAM. Native Rust covers **TAMA collapse**, **TAMA merge**, **FLAIR combine**, **FLAIR precise collapse**, **TACO meta-assembly**, and **SCOTCH**. Pooled construction and per-cell quantification also call pinned builds of **IsoQuant**, **Bambu**, **Bambu-Clump**, **Isosceles**, and **StringTie**.
+`plena discover` pools a genome BAM into one transcriptome. `plena quant` counts molecules per cell from a barcode-tagged BAM. `plena tama`, `plena flair`, `plena taco`, `plena stringtie`, and `plena scotch` run one algorithm with its own inputs and outputs. Native Rust covers **TAMA collapse**, **TAMA merge**, **FLAIR combine**, **FLAIR precise collapse**, **TACO meta-assembly**, and **SCOTCH**. Pooled construction and per-cell quantification also call pinned builds of **IsoQuant**, **Bambu**, **Bambu-Clump**, **Isosceles**, and **StringTie**.
 
 TAMA, FLAIR, TACO, and SCOTCH run in-process. IsoQuant, Bambu, Isosceles, and StringTie stay external programs. Reading BAM files requires `samtools` on `PATH`.
 
@@ -10,17 +10,15 @@ TAMA, FLAIR, TACO, and SCOTCH run in-process. IsoQuant, Bambu, Isosceles, and St
 
 | Command | Input | Main output |
 | --- | --- | --- |
-| `plena tama-collapse` | Sorted SAM/BAM and genome FASTA | Collapsed BED12 models and read reports |
-| `plena tama-merge` | Manifest of annotated BED12 files | Merged BED12 models and source reports |
-| `plena flair-combine` | Manifest of FLAIR transcriptomes | Combined BED12, counts, and isoform map |
-| `plena taco` | Manifest of sample GTF files | Assembled GTF/BED and diagnostic tracks |
-| `plena scotch` | Reference GTF and one BAM/SAM group per sample | Per-sample gene and transcript counts |
-| `plena scotch-dtu` | Two SCOTCH count directories | Gene Wilcoxon and transcript usage tests |
 | `plena discover` | Coordinate-sorted genome BAM, genome FASTA, optional guide GTF | `transcripts.gtf` for one pooled transcriptome |
 | `plena quant` | Barcode-tagged genome BAM, genome FASTA, and annotation GTF | `counts.tsv` keyed by cell barcode |
-| `plena stringtie-merge` | Two or more transcript GTFs | One merged GTF |
-
-The equivalent general commands are `collapse --algo tama`, `merge --algo tama`, and `combine --algo flair`. Those three commands still accept only `tama` or `flair`. StringTie merge is the separate `stringtie-merge` command.
+| `plena tama collapse` | Sorted SAM/BAM and genome FASTA | Collapsed BED12 models and read reports |
+| `plena tama merge` | Manifest of annotated BED12 files | Merged BED12 models and source reports |
+| `plena flair combine` | Manifest of FLAIR transcriptomes | Combined BED12, counts, and isoform map |
+| `plena taco` | Manifest of sample GTF files | Assembled GTF/BED and diagnostic tracks |
+| `plena stringtie merge` | Two or more transcript GTFs | One merged GTF |
+| `plena scotch quant` | Reference GTF and one BAM/SAM group per sample | Per-sample gene and transcript counts |
+| `plena scotch dtu` | Two SCOTCH count directories | Gene Wilcoxon and transcript usage tests |
 
 ## Install
 
@@ -54,7 +52,7 @@ Run TAMA collapse on the bundled test data from the repository root:
 
 ```sh
 mkdir -p demo
-plena tama-collapse \
+plena tama collapse \
   -s tests/parity/gmap_collapse/gmap_test.sam \
   -f tests/parity/gmap_collapse/test_genome.fa \
   -p demo/gmap
@@ -65,9 +63,9 @@ The main annotation is `demo/gmap.bed`. TAMA output prefixes require an existing
 Get the complete option list for any command:
 
 ```sh
-plena tama-collapse --help
-plena tama-merge --help
-plena flair-combine --help
+plena tama collapse --help
+plena tama merge --help
+plena flair combine --help
 plena taco --help
 ```
 
@@ -77,7 +75,7 @@ Provide alignments sorted by reference and position, together with the matching 
 
 ```sh
 mkdir -p results
-plena tama-collapse \
+plena tama collapse \
   -s reads.sorted.bam -b BAM \
   -f genome.fa \
   -p results/sample \
@@ -95,7 +93,7 @@ The CLI defaults to SAM input: **use `-b BAM` for BAM files**, regardless of the
 | `-a` / `-m` / `-z` | `10` / `10` / `10` | 5′, splice-junction, and 3′ coordinate thresholds |
 | `-d` | `merge_dup` | Merge duplicate models, or use `no_merge` |
 
-Legacy multi-character options such as `-rm`, `-icm`, `-sj`, and `-vc` are also accepted in place of their double-dash spellings. `plena tama-collapse -v 1` prints the upstream TAMA version date; `plena --version` prints the plena version.
+Legacy multi-character options such as `-rm`, `-icm`, `-sj`, and `-vc` are also accepted in place of their double-dash spellings. `plena tama collapse -v 1` prints the upstream TAMA version date; `plena --version` prints the plena version.
 
 For prefix `sample`, output files are:
 
@@ -127,7 +125,7 @@ For example, this command writes real tab delimiters:
 ```sh
 printf 'sample1.bed\tcapped\t1,1,1\tS1\nsample2.bed\tno_cap\t2,2,2\tS2\n' > merge.tsv
 mkdir -p results
-plena tama-merge -f merge.tsv -p results/merged -d merge_dup
+plena tama merge -f merge.tsv -p results/merged -d merge_dup
 ```
 
 The manifest must contain no spaces or blank rows. Each BED12 name must contain `gene_id;transcript_id`, and strand must be `+` or `-`. Priorities are three comma-separated integers used in coordinate voting.
@@ -148,7 +146,7 @@ Use `isoforms` for ordinary transcriptomes and `fusionisoform` for fusion models
 
 ```sh
 printf 'S1\tisoforms\tsample1.bed\nS2\tisoforms\tsample2.bed\n' > flair.tsv
-plena flair-combine -m flair.tsv -o results/combined
+plena flair combine -m flair.tsv -o results/combined
 ```
 
 Use FLAIR-style transcript/gene names in the BED input. Optional FASTA and read-map files should correspond to those isoforms. To provide a read map without FASTA, leave the fourth column empty. Manifest rows must not be blank.
@@ -184,11 +182,11 @@ For all manifests above, relative input paths are resolved against the **current
 
 ## SCOTCH quantification
 
-`plena scotch` assigns each cell UMI in a full-length long-read BAM or SAM to a known or novel isoform of a gene in the reference GTF.
+`plena scotch quant` assigns each cell UMI in a full-length long-read BAM or SAM to a known or novel isoform of a gene in the reference GTF.
 
 ```sh
-plena scotch --bam sample.bam --gtf genes.gtf --out scotch_out
-plena scotch-dtu --a scotch_out/sampleA --b scotch_out/sampleB --out dtu.tsv
+plena scotch quant --bam sample.bam --gtf genes.gtf --out scotch_out
+plena scotch dtu --a scotch_out/sampleA --b scotch_out/sampleB --out dtu.tsv
 ```
 
 Repeat `--bam` for more than one sample. A path may be a file or a directory of `*.bam` and `*.sam` files; a directory is one sample. Samples share the annotation and discover novel isoforms together. Counts are written per sample.
@@ -220,10 +218,10 @@ barcode    transcript_id    count
 ## StringTie merge
 
 ```sh
-plena stringtie-merge -o merged.gtf sample1.gtf sample2.gtf
+plena stringtie merge -o merged.gtf sample1.gtf sample2.gtf
 ```
 
-An optional `-G guide.gtf` is passed through to `stringtie --merge`. `plena merge --algo` still accepts only `tama`.
+An optional `-G guide.gtf` is passed through to `stringtie --merge`.
 
 ## Pinned external programs
 
@@ -237,7 +235,7 @@ An optional `-G guide.gtf` is passed through to `stringtie --merge`. `plena merg
 
 Resolution order is `PLENA_ISOQUANT`, `PLENA_STRINGTIE`, `PLENA_RSCRIPT`, or `PLENA_SAMTOOLS`, then `~/.local/bin`, then `~/miniforge3/envs/plena-lr/bin`. `Rscript` does not fall back to `PATH`. The other programs do.
 
-Each sample directory contains `count_matrix/gene_counts.csv`, `count_matrix/transcript_counts.csv`, `count_matrix/gene_transcript.tsv`, and `auxiliary/assignments.tsv`. The output directory also contains `annotation.gtf`: the reference records plus novel transcripts. Gene p-values from `scotch-dtu` are Holm-adjusted. Transcript and DTU gene p-values are Benjamini-Hochberg adjusted. A transcript test requires at least 20 cells and 20 total counts in each group.
+Each sample directory contains `count_matrix/gene_counts.csv`, `count_matrix/transcript_counts.csv`, `count_matrix/gene_transcript.tsv`, and `auxiliary/assignments.tsv`. The output directory also contains `annotation.gtf`: the reference records plus novel transcripts. Gene p-values from `scotch dtu` are Holm-adjusted. Transcript and DTU gene p-values are Benjamini-Hochberg adjusted. A transcript test requires at least 20 cells and 20 total counts in each group.
 
 ## Compatibility and validation
 

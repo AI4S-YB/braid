@@ -38,84 +38,80 @@ fn run(args: &[&str]) -> Output {
 #[test]
 fn tama_legacy_and_long_flags_write_all_oracle_outputs() {
     let golden = parity().join("gmap_collapse");
-    for command in ["tama-collapse", "collapse"] {
-        for dash in ["-", "--"] {
-            let dir = WorkDir::new();
-            let prefix = dir.0.join("gmap");
-            let sam = golden.join("gmap_test.sam");
-            let fasta = golden.join("test_genome.fa");
-            let mut cmd = Command::new(env!("CARGO_BIN_EXE_plena"));
-            cmd.arg(command)
-                .arg("-s")
-                .arg(&sam)
-                .arg("-f")
-                .arg(&fasta)
-                .arg("-p")
-                .arg(&prefix);
-            for (key, value) in [
-                ("icm", "ident_cov"),
-                ("sj", "no_priority"),
-                ("sjt", "10"),
-                ("lde", "1000"),
-                ("ses", "_"),
-                ("log", "log_off"),
-                ("rm", "original"),
-                ("vc", "9"),
-            ] {
-                cmd.arg(format!("{dash}{key}")).arg(value);
-            }
-            let output = cmd.output().unwrap();
-            assert!(
-                output.status.success(),
-                "{command} {dash}: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 10);
-            for suffix in [
-                ".bed",
-                "_read.txt",
-                "_trans_report.txt",
-                "_trans_read.bed",
-                "_polya.txt",
-                "_strand_check.txt",
-                "_local_density_error.txt",
-                "_variants.txt",
-                "_varcov.txt",
-                "_report.txt",
-            ] {
-                let expected = fs::read_to_string(golden.join(format!("gmap{suffix}")))
-                    .unwrap()
-                    .replace("test_files/gmap_test.sam", &sam.display().to_string())
-                    .replace("test_files/test_genome.fa", &fasta.display().to_string())
-                    .replace(
-                        "/work/plena/tests/parity/gmap_collapse/gmap",
-                        &prefix.display().to_string(),
-                    );
-                let actual = fs::read_to_string(dir.0.join(format!("gmap{suffix}"))).unwrap();
-                assert_eq!(actual, expected, "{command} {dash}: {suffix}");
-            }
+    for dash in ["-", "--"] {
+        let dir = WorkDir::new();
+        let prefix = dir.0.join("gmap");
+        let sam = golden.join("gmap_test.sam");
+        let fasta = golden.join("test_genome.fa");
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_plena"));
+        cmd.args(["tama", "collapse"])
+            .arg("-s")
+            .arg(&sam)
+            .arg("-f")
+            .arg(&fasta)
+            .arg("-p")
+            .arg(&prefix);
+        for (key, value) in [
+            ("icm", "ident_cov"),
+            ("sj", "no_priority"),
+            ("sjt", "10"),
+            ("lde", "1000"),
+            ("ses", "_"),
+            ("log", "log_off"),
+            ("rm", "original"),
+            ("vc", "9"),
+        ] {
+            cmd.arg(format!("{dash}{key}")).arg(value);
+        }
+        let output = cmd.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{dash}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 10);
+        for suffix in [
+            ".bed",
+            "_read.txt",
+            "_trans_report.txt",
+            "_trans_read.bed",
+            "_polya.txt",
+            "_strand_check.txt",
+            "_local_density_error.txt",
+            "_variants.txt",
+            "_varcov.txt",
+            "_report.txt",
+        ] {
+            let expected = fs::read_to_string(golden.join(format!("gmap{suffix}")))
+                .unwrap()
+                .replace("test_files/gmap_test.sam", &sam.display().to_string())
+                .replace("test_files/test_genome.fa", &fasta.display().to_string())
+                .replace(
+                    "/work/plena/tests/parity/gmap_collapse/gmap",
+                    &prefix.display().to_string(),
+                );
+            let actual = fs::read_to_string(dir.0.join(format!("gmap{suffix}"))).unwrap();
+            assert_eq!(actual, expected, "{dash}: {suffix}");
         }
     }
 }
 
 #[test]
 fn tama_version_does_not_require_input_files() {
-    for command in ["tama-collapse", "collapse"] {
-        let output = run(&[command, "-v", "1"]);
-        assert!(output.status.success());
-        let stdout = String::from_utf8(output.stdout)
-            .unwrap()
-            .replace("\r\n", "\n");
-        assert_eq!(stdout, "tc_version_date_2023_03_28\nProgram did not run\n");
-        assert!(output.stderr.is_empty());
-    }
+    let output = run(&["tama", "collapse", "-v", "1"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout)
+        .unwrap()
+        .replace("\r\n", "\n");
+    assert_eq!(stdout, "tc_version_date_2023_03_28\nProgram did not run\n");
+    assert!(output.stderr.is_empty());
 }
 
 #[test]
 fn tama_execution_still_requires_inputs() {
     for args in [
-        vec!["tama-collapse"],
-        vec!["tama-collapse", "-s", "missing.sam"],
+        vec!["tama", "collapse"],
+        vec!["tama", "collapse", "-s", "missing.sam"],
     ] {
         let output = run(&args);
         assert_eq!(output.status.code(), Some(2));
@@ -145,7 +141,7 @@ fn collapse_preflight_errors_preserve_existing_outputs() {
                 golden.join("test_genome.fa")
             };
             let output = Command::new(env!("CARGO_BIN_EXE_plena"))
-                .args(["tama-collapse", "--rm", mode, "-x"])
+                .args(["tama", "collapse", "--rm", mode, "-x"])
                 .arg(if failure == "cap" {
                     "invalid"
                 } else {
@@ -203,7 +199,7 @@ fn flair_output_preserves_non_utf8_paths() {
     let native_dir = dir.0.join(OsString::from_vec(b"native-\xff".to_vec()));
     for output_dir in [&ascii_dir, &native_dir] {
         let output = Command::new(env!("CARGO_BIN_EXE_plena"))
-            .args(["flair-combine", "-c", "-m"])
+            .args(["flair", "combine", "-c", "-m"])
             .arg(&manifest)
             .arg("-o")
             .arg(output_dir.join("combined"))
@@ -229,21 +225,17 @@ fn flair_output_preserves_non_utf8_paths() {
 #[test]
 fn merge_is_available_and_legacy_cds_reaches_input_validation() {
     let output = run(&[
-        "tama-merge",
-        "-f",
-        "unused",
-        "-p",
-        "unused",
-        "-cds",
-        "source",
+        "tama", "merge", "-f", "unused", "-p", "unused", "-cds", "source",
     ]);
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stderr).contains("read unused"));
     let output = run(&["--help"]);
     let help = String::from_utf8(output.stdout).unwrap();
     assert!(!help.contains("not implemented"));
-    assert!(help.contains("  tama-merge"));
-    assert!(help.contains("  merge "));
+    assert!(help.contains("  tama "));
+    let tama_help = String::from_utf8(run(&["tama", "--help"]).stdout).unwrap();
+    assert!(tama_help.contains("  merge "));
+    assert!(tama_help.contains("  collapse "));
 }
 
 #[test]
@@ -251,7 +243,9 @@ fn scotch_quantifies_a_sam_group_and_help_lists_the_command() {
     let help = run(&["--help"]);
     let text = String::from_utf8(help.stdout).unwrap();
     assert!(text.contains("  scotch "));
-    assert!(text.contains("  scotch-dtu "));
+    let scotch_help = String::from_utf8(run(&["scotch", "--help"]).stdout).unwrap();
+    assert!(scotch_help.contains("  quant "));
+    assert!(scotch_help.contains("  dtu "));
     assert!(!text.contains("not implemented"));
     let dir = WorkDir::new();
     let gtf = dir.0.join("genes.gtf");
@@ -274,7 +268,7 @@ chr1\t.\texon\t101\t200\t.\t+\t.\tgene_id \"G1\"; gene_name \"GENE1\"; transcrip
     .unwrap();
     let out = dir.0.join("scotch");
     let output = Command::new(env!("CARGO_BIN_EXE_plena"))
-        .arg("scotch")
+        .args(["scotch", "quant"])
         .arg("--bam")
         .arg(&sam)
         .arg("--gtf")
@@ -377,7 +371,7 @@ fn flair_cli_writes_filtered_chain_regression_outputs() {
     )
     .unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_plena"))
-        .arg("flair-combine")
+        .args(["flair", "combine"])
         .arg("-m")
         .arg(manifest)
         .arg("-o")
@@ -444,7 +438,7 @@ fn check_fixture(name: &str, kind: &str, success: bool, bam: bool) {
     let dir = WorkDir::new();
     let args = fixture_args(&case, &dir.0, kind, bam);
     let output = Command::new(env!("CARGO_BIN_EXE_plena"))
-        .arg(format!("tama-{kind}"))
+        .args(["tama", kind])
         .args(&args)
         .output()
         .unwrap();
@@ -539,7 +533,7 @@ fn truncated_bam_is_not_reported_as_success() {
     let bam = dir.0.join("broken.bam");
     fs::write(&bam, b"BAM\x01not a valid BAM file").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_plena"))
-        .arg("tama-collapse")
+        .args(["tama", "collapse"])
         .arg("-s")
         .arg(bam)
         .arg("-b")
@@ -565,7 +559,7 @@ fn merge_default_rejects_duplicate_groups() {
     let index = args.iter().position(|s| s == "-d").unwrap();
     args.drain(index..index + 2);
     let output = Command::new(env!("CARGO_BIN_EXE_plena"))
-        .arg("merge")
+        .args(["tama", "merge"])
         .args(args)
         .output()
         .unwrap();

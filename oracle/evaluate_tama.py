@@ -24,7 +24,7 @@ def compare(name, kind, args):
         out = d / side
         out.mkdir(exist_ok=True)
         oracle = [options.python2] if options.python2 else [sys.executable, str(repo / 'oracle/python2_compat.py')]
-        cmd = oracle + [str(options.upstream / ('tama_' + kind + '.py'))] if side == 'py' else [str(repo / 'target/debug/plena'), 'tama-' + kind]
+        cmd = oracle + [str(options.upstream / ('tama_' + kind + '.py'))] if side == 'py' else [str(repo / 'target/debug/plena'), 'tama', kind]
         cmd += args + ['-p', str(out / 'out')]
         (out / 'command.json').write_text(json.dumps(cmd))
         try:

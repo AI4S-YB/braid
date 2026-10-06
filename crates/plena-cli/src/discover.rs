@@ -230,7 +230,7 @@ pub fn stringtie_merge(
     gtfs: &[PathBuf],
 ) -> Result<(), String> {
     if gtfs.is_empty() {
-        return Err("stringtie-merge needs at least one GTF".to_string());
+        return Err("stringtie merge needs at least one GTF".to_string());
     }
     let program = tools::stringtie()?;
     let mut command = vec![

@@ -32,30 +32,52 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Collapse alignments into transcript models.
-    Collapse(CollapseArgs),
-    /// Merge annotation sets with TAMA.
-    Merge(MergeArgs),
-    /// Combine transcriptomes. FLAIR combine is available.
-    Combine(CombineArgs),
-    /// TAMA collapse with original parameter spellings.
-    TamaCollapse(TamaCollapseArgs),
-    /// TAMA merge with original parameter spellings.
-    TamaMerge(TamaMergeArgs),
-    /// Same flags as `flair combine`.
-    FlairCombine(FlairCombineArgs),
-    /// Meta-assemble sample GTFs with TACO.
-    Taco(TacoArgs),
-    /// Quantify single-cell full-length isoforms with SCOTCH.
-    Scotch(ScotchArgs),
-    /// Test differential transcript usage between two SCOTCH count directories.
-    ScotchDtu(ScotchDtuArgs),
     /// Pool a genome BAM into one transcriptome annotation.
     Discover(discover::DiscoverArgs),
     /// Quantify cells from a barcode-tagged genome BAM.
     Quant(quant::QuantArgs),
+    /// Collapse alignments or merge BED annotations with TAMA.
+    #[command(subcommand)]
+    Tama(TamaCommand),
+    /// Combine FLAIR transcriptomes.
+    #[command(subcommand)]
+    Flair(FlairCommand),
+    /// Meta-assemble sample GTFs with TACO.
+    Taco(TacoArgs),
     /// Merge transcript GTFs with StringTie.
-    StringtieMerge(StringtieMergeArgs),
+    #[command(subcommand)]
+    Stringtie(StringtieCommand),
+    /// Quantify isoforms or test differential usage with SCOTCH.
+    #[command(subcommand)]
+    Scotch(ScotchCommand),
+}
+
+#[derive(Subcommand)]
+enum TamaCommand {
+    /// Collapse alignments into transcript models.
+    Collapse(Box<TamaCollapseArgs>),
+    /// Merge annotated BED12 files.
+    Merge(TamaMergeArgs),
+}
+
+#[derive(Subcommand)]
+enum FlairCommand {
+    /// Combine isoform BED files into one transcriptome.
+    Combine(FlairCombineArgs),
+}
+
+#[derive(Subcommand)]
+enum StringtieCommand {
+    /// Merge assembled transcript GTFs.
+    Merge(StringtieMergeArgs),
+}
+
+#[derive(Subcommand)]
+enum ScotchCommand {
+    /// Quantify single-cell full-length isoforms.
+    Quant(Box<ScotchArgs>),
+    /// Test differential transcript usage between two count directories.
+    Dtu(Box<ScotchDtuArgs>),
 }
 
 #[derive(Args, Debug)]
@@ -68,33 +90,6 @@ struct StringtieMergeArgs {
     guide: Option<PathBuf>,
     /// Assembled transcript GTFs.
     gtfs: Vec<PathBuf>,
-}
-
-#[derive(Args)]
-struct CollapseArgs {
-    /// Algorithm. Only `tama` is available.
-    #[arg(long, default_value = "tama")]
-    algo: String,
-    #[command(flatten)]
-    tama: TamaCollapseArgs,
-}
-
-#[derive(Args)]
-struct MergeArgs {
-    /// Algorithm. Only `tama` is available.
-    #[arg(long, default_value = "tama")]
-    algo: String,
-    #[command(flatten)]
-    tama: TamaMergeArgs,
-}
-
-#[derive(Args)]
-struct CombineArgs {
-    /// Algorithm. Only `flair` is available.
-    #[arg(long, default_value = "flair")]
-    algo: String,
-    #[command(flatten)]
-    flair: FlairCombineArgs,
 }
 
 #[derive(Args, Debug)]
@@ -427,16 +422,19 @@ struct ScotchDtuArgs {
 // clap's short options are single characters. Translate only TAMA option
 // tokens, preserving values and non-UTF-8 paths, before handing them to clap.
 fn normalize_tama_args(mut args: Vec<OsString>) -> Vec<OsString> {
-    let Some(command) = args.get(1).and_then(|s| s.to_str()) else {
+    let (Some(command), Some(action)) = (
+        args.get(1).and_then(|s| s.to_str()),
+        args.get(2).and_then(|s| s.to_str()),
+    ) else {
         return args;
     };
-    let legacy: &[&str] = match command {
-        "collapse" | "tama-collapse" => &["icm", "sj", "sjt", "lde", "ses", "log", "rm", "vc"],
-        "merge" | "tama-merge" => &["cds"],
+    let legacy: &[&str] = match (command, action) {
+        ("tama", "collapse") => &["icm", "sj", "sjt", "lde", "ses", "log", "rm", "vc"],
+        ("tama", "merge") => &["cds"],
         _ => return args,
     };
     let mut value_next = false;
-    for arg in args.iter_mut().skip(2) {
+    for arg in args.iter_mut().skip(3) {
         if value_next {
             value_next = false;
             continue;
@@ -467,7 +465,6 @@ fn normalize_tama_args(mut args: Vec<OsString>) -> Vec<OsString> {
                         | "-d"
                         | "-b"
                         | "-v"
-                        | "--algo"
                 )
                 || option
                     .strip_prefix("--")
@@ -482,36 +479,13 @@ fn normalize_tama_args(mut args: Vec<OsString>) -> Vec<OsString> {
 fn main() -> ExitCode {
     let cli = Cli::parse_from(normalize_tama_args(std::env::args_os().collect()));
     match cli.command {
-        Command::Collapse(args) => {
-            if args.algo != "tama" {
-                eprintln!("unknown collapse algorithm '{}'", args.algo);
-                return ExitCode::from(2);
-            }
-            run_collapse(args.tama)
-        }
-        Command::TamaCollapse(args) => run_collapse(args),
-        Command::Merge(args) => {
-            if args.algo != "tama" {
-                eprintln!("unknown merge algorithm '{}'", args.algo);
-                return ExitCode::from(2);
-            }
-            run_merge(args.tama)
-        }
-        Command::TamaMerge(args) => run_merge(args),
-        Command::Combine(args) => {
-            if args.algo != "flair" {
-                eprintln!("unknown combine algorithm '{}'", args.algo);
-                return ExitCode::from(2);
-            }
-            run_flair_combine(args.flair)
-        }
-        Command::FlairCombine(args) => run_flair_combine(args),
-        Command::Taco(args) => run_taco(args),
-        Command::Scotch(args) => run_scotch(args),
-        Command::ScotchDtu(args) => run_scotch_dtu(args),
         Command::Discover(args) => discover::run(args),
         Command::Quant(args) => quant::run(args),
-        Command::StringtieMerge(args) => {
+        Command::Tama(TamaCommand::Collapse(args)) => run_collapse(*args),
+        Command::Tama(TamaCommand::Merge(args)) => run_merge(args),
+        Command::Flair(FlairCommand::Combine(args)) => run_flair_combine(args),
+        Command::Taco(args) => run_taco(args),
+        Command::Stringtie(StringtieCommand::Merge(args)) => {
             match discover::stringtie_merge(&args.output, args.guide.as_deref(), &args.gtfs) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(err) => {
@@ -520,6 +494,8 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Command::Scotch(ScotchCommand::Quant(args)) => run_scotch(*args),
+        Command::Scotch(ScotchCommand::Dtu(args)) => run_scotch_dtu(*args),
     }
 }
 
@@ -788,7 +764,8 @@ mod tests {
         assert_eq!(
             normalized(&[
                 "plena",
-                "tama-collapse",
+                "tama",
+                "collapse",
                 "-p",
                 "-rm",
                 "-icm=ident_map",
@@ -797,7 +774,8 @@ mod tests {
             ]),
             [
                 "plena",
-                "tama-collapse",
+                "tama",
+                "collapse",
                 "-p",
                 "-rm",
                 "--icm=ident_map",
@@ -806,7 +784,7 @@ mod tests {
             ]
             .map(OsString::from),
         );
-        let flair = ["plena", "flair-combine", "-m", "-rm", "-icm"];
+        let flair = ["plena", "flair", "combine", "-m", "-rm", "-icm"];
         assert_eq!(normalized(&flair), flair.map(OsString::from));
     }
 
@@ -817,6 +795,7 @@ mod tests {
         let path = OsString::from_vec(b"input-\xff.sam".to_vec());
         let args = vec![
             "plena".into(),
+            "tama".into(),
             "collapse".into(),
             "-s".into(),
             path.clone(),
@@ -824,7 +803,7 @@ mod tests {
             "original".into(),
         ];
         let got = normalize_tama_args(args);
-        assert_eq!(got[3], path);
-        assert_eq!(got[4], "--rm");
+        assert_eq!(got[4], path);
+        assert_eq!(got[5], "--rm");
     }
 }

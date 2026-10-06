@@ -68,60 +68,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
-name = "plena-cli"
-version = "0.2.0"
-dependencies = [
- "plena-flair",
- "plena-model",
- "plena-scotch",
- "plena-taco",
- "plena-tama",
- "clap",
-]
-
-[[package]]
-name = "plena-flair"
-version = "0.2.0"
-dependencies = [
- "plena-io",
-]
-
-[[package]]
-name = "plena-io"
-version = "0.2.0"
-dependencies = [
- "plena-model",
-]
-
-[[package]]
-name = "plena-model"
-version = "0.2.0"
-
-[[package]]
-name = "plena-scotch"
-version = "0.2.0"
-dependencies = [
- "plena-io",
- "statrs",
-]
-
-[[package]]
-name = "plena-taco"
-version = "0.2.0"
-dependencies = [
- "plena-io",
- "plena-model",
-]
-
-[[package]]
-name = "plena-tama"
-version = "0.2.0"
-dependencies = [
- "plena-io",
- "plena-model",
-]
-
-[[package]]
 name = "bytemuck"
 version = "1.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -301,6 +247,60 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
+name = "plena-cli"
+version = "0.2.0"
+dependencies = [
+ "clap",
+ "plena-flair",
+ "plena-model",
+ "plena-scotch",
+ "plena-taco",
+ "plena-tama",
+]
+
+[[package]]
+name = "plena-flair"
+version = "0.2.0"
+dependencies = [
+ "plena-io",
+]
+
+[[package]]
+name = "plena-io"
+version = "0.2.0"
+dependencies = [
+ "plena-model",
+]
+
+[[package]]
+name = "plena-model"
+version = "0.2.0"
+
+[[package]]
+name = "plena-scotch"
+version = "0.2.0"
+dependencies = [
+ "plena-io",
+ "statrs",
+]
+
+[[package]]
+name = "plena-taco"
+version = "0.2.0"
+dependencies = [
+ "plena-io",
+ "plena-model",
+]
+
+[[package]]
+name = "plena-tama"
+version = "0.2.0"
+dependencies = [
+ "plena-io",
+ "plena-model",
+]
 
 [[package]]
 name = "ppv-lite86"

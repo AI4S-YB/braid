@@ -313,39 +313,47 @@ fn fresh(name: &str) -> PathBuf {
 }
 
 #[test]
-fn help_lists_stage_commands_without_dropping_the_existing_ones() {
+fn help_lists_pipeline_and_tool_commands() {
     let output = plena(&["--help"]);
     assert!(output.status.success());
     let help = String::from_utf8(output.stdout).unwrap();
     for command in [
         "discover",
         "quant",
-        "stringtie-merge",
-        "tama-merge",
-        "merge",
-        "scotch",
-        "scotch-dtu",
+        "tama",
+        "flair",
         "taco",
+        "stringtie",
+        "scotch",
     ] {
         assert!(
-            help.contains(&format!("  {command}")),
+            help.contains(&format!("  {command} ")),
             "help is missing {command}:\n{help}"
         );
     }
+    for retired in [
+        "tama-collapse",
+        "tama-merge",
+        "flair-combine",
+        "stringtie-merge",
+        "scotch-dtu",
+    ] {
+        assert!(
+            !help.contains(retired),
+            "help still lists {retired}:\n{help}"
+        );
+    }
     assert!(!help.contains("not implemented"));
-    let rejected = plena(&[
-        "merge",
-        "--algo",
-        "stringtie",
-        "-f",
-        "unused",
-        "-p",
-        "unused",
-    ]);
-    assert_eq!(rejected.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&rejected.stderr);
-    assert!(stderr.contains("unknown merge algorithm"));
-    assert!(!stderr.contains("not implemented"));
+    let tama = String::from_utf8(plena(&["tama", "--help"]).stdout).unwrap();
+    assert!(tama.contains("  collapse "));
+    assert!(tama.contains("  merge "));
+    let flair = String::from_utf8(plena(&["flair", "--help"]).stdout).unwrap();
+    assert!(flair.contains("  combine "));
+    let stringtie = String::from_utf8(plena(&["stringtie", "--help"]).stdout).unwrap();
+    assert!(stringtie.contains("  merge "));
+    let scotch = String::from_utf8(plena(&["scotch", "--help"]).stdout).unwrap();
+    assert!(scotch.contains("  quant "));
+    assert!(scotch.contains("  dtu "));
 }
 
 #[test]
@@ -589,7 +597,8 @@ fn stringtie_merge_keeps_models_from_both_inputs() {
     fs::write(&right, locus_gtf("chr1", 8001, "B1")).unwrap();
     let merged = dir.0.join("merged.gtf");
     let output = plena(&[
-        "stringtie-merge",
+        "stringtie",
+        "merge",
         "-o",
         &merged.to_string_lossy(),
         &left.to_string_lossy(),

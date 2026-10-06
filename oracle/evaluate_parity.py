@@ -86,7 +86,7 @@ def audit(args):
         manifest = case / "manifest.tsv"
         manifest.write_text("\n".join(rows) + "\n")
         codes = {}
-        for label, cmd in (("upstream", oracle), ("plena", [str(binary), "flair-combine"])):
+        for label, cmd in (("upstream", oracle), ("plena", [str(binary), "flair", "combine"])):
             directory = case / label
             codes[label] = execute([*cmd, "-m", str(manifest), "-o", str(directory / "combined"), *flags], directory)
         files = {label: {p.name: p.read_bytes() for p in (case / label).glob("combined*")}
