@@ -1,0 +1,12 @@
+Fixtures and expected BED outputs are from BrooksLabUCSC/flair
+commit 573414c551332bf6348a9d04ba7cf562f67416cb
+src/flair/collapse_isoforms_precise.py.
+Copyright 2019-2026 The Regents of the University of California.
+BSD-3-Clause. The license text is ../flair_combine/FLAIR-LICENSE.txt.
+
+in.bed was collapsed with:
+  collapse_isoforms_precise.py -q in.bed -o expected.bed -i -w 100 -m 2 -n none
+expected-gtf.bed adds -f annot.gtf. The script default support proportion
+0.25 is left in place by omitting -s. This is the precise-collapse call that
+flair collapse makes for isoform-level ends. The later minimap2 recount is
+not part of this fixture.

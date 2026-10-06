@@ -3,7 +3,7 @@ name = "braid-flair"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "FLAIR combine, matched to BrooksLabUCSC/flair commit 573414c"
+description = "FLAIR combine and precise collapse, matched to BrooksLabUCSC/flair commit 573414c"
 
 [dependencies]
 braid-io = { path = "../braid-io" }

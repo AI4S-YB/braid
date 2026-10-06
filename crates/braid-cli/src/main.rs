@@ -3,6 +3,11 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use braid_flair::{combine, write_combine_texts, CombineSettings};
+
+mod dedup;
+mod discover;
+mod quant;
+mod tools;
 use braid_scotch::{
     differential_usage, quantify, write_dtu, DtuSettings, Platform, ScotchSettings,
 };
@@ -17,7 +22,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(
     name = "braid",
     version,
-    about = "Reconcile transcript models with TAMA collapse, TAMA merge, FLAIR combine, TACO, and SCOTCH.",
+    about = "Build and quantify single-cell long-read transcriptomes with TAMA, FLAIR, TACO, SCOTCH, IsoQuant, Bambu, Isosceles, and StringTie.",
     after_help = "TAMA supports capped/no_cap and original/low_mem modes. BAM input requires samtools on PATH. Legacy TAMA single-dash options are accepted; console logs may differ from upstream."
 )]
 struct Cli {
@@ -45,6 +50,24 @@ enum Command {
     Scotch(ScotchArgs),
     /// Test differential transcript usage between two SCOTCH count directories.
     ScotchDtu(ScotchDtuArgs),
+    /// Pool a genome BAM into one transcriptome annotation.
+    Discover(discover::DiscoverArgs),
+    /// Quantify cells from a barcode-tagged genome BAM.
+    Quant(quant::QuantArgs),
+    /// Merge transcript GTFs with StringTie.
+    StringtieMerge(StringtieMergeArgs),
+}
+
+#[derive(Args, Debug)]
+struct StringtieMergeArgs {
+    /// Merged GTF.
+    #[arg(short = 'o', long = "output")]
+    output: PathBuf,
+    /// Optional guide annotation passed to `stringtie --merge -G`.
+    #[arg(short = 'G', long = "guide")]
+    guide: Option<PathBuf>,
+    /// Assembled transcript GTFs.
+    gtfs: Vec<PathBuf>,
 }
 
 #[derive(Args)]
@@ -486,6 +509,17 @@ fn main() -> ExitCode {
         Command::Taco(args) => run_taco(args),
         Command::Scotch(args) => run_scotch(args),
         Command::ScotchDtu(args) => run_scotch_dtu(args),
+        Command::Discover(args) => discover::run(args),
+        Command::Quant(args) => quant::run(args),
+        Command::StringtieMerge(args) => {
+            match discover::stringtie_merge(&args.output, args.guide.as_deref(), &args.gtfs) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(err) => {
+                    eprintln!("{err}");
+                    ExitCode::from(1)
+                }
+            }
+        }
     }
 }
 

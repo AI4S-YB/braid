@@ -1,8 +1,8 @@
 # braid
 
-Reconcile transcript models with Rust implementations of **TAMA collapse**, **TAMA merge**, **FLAIR combine**, **TACO meta-assembly**, and **SCOTCH** isoform quantification.
+Reconcile transcript models with Rust implementations of **TAMA collapse**, **TAMA merge**, **FLAIR combine**, **FLAIR precise collapse**, **TACO meta-assembly**, and **SCOTCH** isoform quantification. Pooled construction and per-cell quantification also call pinned builds of **IsoQuant**, **Bambu**, **Bambu-Clump**, **Isosceles**, and **StringTie**.
 
-The project focuses on reproducing upstream algorithm behavior and output formats. Algorithms run natively in Rust; Python is used only by development oracle scripts. Reading BAM files requires `samtools` on `PATH`.
+The project focuses on reproducing upstream algorithm behavior and output formats. TAMA, FLAIR, TACO, and SCOTCH run natively in Rust. IsoQuant, Bambu, Isosceles, and StringTie stay external programs. Reading BAM files requires `samtools` on `PATH`.
 
 ## Commands
 
@@ -14,8 +14,11 @@ The project focuses on reproducing upstream algorithm behavior and output format
 | `braid taco` | Manifest of sample GTF files | Assembled GTF/BED and diagnostic tracks |
 | `braid scotch` | Reference GTF and one BAM/SAM group per sample | Per-sample gene and transcript counts |
 | `braid scotch-dtu` | Two SCOTCH count directories | Gene Wilcoxon and transcript usage tests |
+| `braid discover` | Coordinate-sorted genome BAM, genome FASTA, optional guide GTF | `transcripts.gtf` for one pooled transcriptome |
+| `braid quant` | Barcode-tagged genome BAM, genome FASTA, and annotation GTF | `counts.tsv` keyed by cell barcode |
+| `braid stringtie-merge` | Two or more transcript GTFs | One merged GTF |
 
-The equivalent general commands are `collapse --algo tama`, `merge --algo tama`, and `combine --algo flair`. These are currently the only algorithms available for those commands.
+The equivalent general commands are `collapse --algo tama`, `merge --algo tama`, and `combine --algo flair`. Those three commands still accept only `tama` or `flair`. StringTie merge is the separate `stringtie-merge` command.
 
 ## Install
 
@@ -192,6 +195,46 @@ Repeat `--bam` for more than one sample. A path may be a file or a directory of 
 
 A read that matches no annotated isoform can seed a novel isoform. SCOTCH keeps that isoform only when a discovery chunk assigns at least 10 reads. Shorter novel copies are grouped into a longer isoform when the extra exons sit on the truncated end, unless `--no-group-novel` is set. `--novel-read-n` and `--novel-read-pct` drop weakly supported novels after that grouping; their reads are counted as `uncategorized_novel`.
 
+## Pooled discovery
+
+`braid discover` pools every cell in one coordinate-sorted genome BAM and writes `transcripts.gtf` plus `command.log`. `--algo` is `tama`, `flair`, `isoquant`, `bambu`, or `stringtie`. `--genome` is the FASTA that matches the BAM. `--gtf` is optional for TAMA, FLAIR, and StringTie, and required for IsoQuant and Bambu. `--threads` defaults to 1.
+
+`flair` is the native precise-collapse step (`collapse_isoforms_precise.py` behavior): alignments become BED12, then isoforms. It does not run minimap2. `tama` uses the existing collapse defaults and converts the BED12 models to GTF. `stringtie` runs long-read assembly (`stringtie -L`). IsoQuant discovery is the bulk transcript-discovery run. Bambu discovery calls `bambu()` with discovery on and quantification off.
+
+Tool-specific files remain under `<out>/raw/`.
+
+## Per-cell quantification
+
+`braid quant` reads a genome BAM that already has cell-barcode and UMI tags, plus an annotation GTF, and writes `counts.tsv`:
+
+```text
+barcode    transcript_id    count
+```
+
+`--algo` is `scotch`, `isoquant`, `isosceles`, or `bambu`. `--barcode-tag` and `--umi-tag` default to `CB` and `UB`. A repeated cell-barcode and UMI pair is one molecule. Raw tool output stays under `<out>/raw/`.
+
+`scotch` is the existing quantifier and still writes novel transcripts to `<out>/annotation.gtf`. `isoquant` uses `--barcoded_bam` and does not discover novel genes in this mode. `bambu` calls Bambu-Clump `bambu.singlecell`. That build reads `CB` and `UB`, and its own UMI deduplication runs only after a chromosome has more than 100 distinct UMIs, so the command first keeps one primary alignment per cell and UMI. Isosceles assigns reads to the reference transcripts and runs its EM step after the same per-cell UMI filter, because Isosceles counts alignments and does not read a UMI tag. IsoQuant and SCOTCH deduplicate UMIs themselves.
+
+## StringTie merge
+
+```sh
+braid stringtie-merge -o merged.gtf sample1.gtf sample2.gtf
+```
+
+An optional `-G guide.gtf` is passed through to `stringtie --merge`. `braid merge --algo` still accepts only `tama`.
+
+## Pinned external programs
+
+| Tool | Pin | How braid runs it |
+| --- | --- | --- |
+| FLAIR precise collapse | BrooksLabUCSC/flair `573414c551332bf6348a9d04ba7cf562f67416cb` | In-process Rust, checked against `tests/parity/flair_collapse` |
+| IsoQuant | v4.0.0, commit `7d8268918a770b8d0c6925e8cea99d6c969b4eae` (GPL-2.0-only) | `isoquant` subprocess. Sources are not in this tree |
+| StringTie | AI4S-YB/stringtie-rust `743b9710b421f4409aaf9ad0fe7543e55dab116b` (StringTie 3.0.3, MIT) | `stringtie` subprocess |
+| Bambu / Bambu-Clump | Pipeline GoekeLab/bambu-singlecell-spatial `aa17818929fb1f64029c8c6d46d112c1d2c9488e`. `bambu.singlecell` is GoekeLab/bambu `d704164f0e20c7fe3fe98ba0921e0893cbe3613f` (package 3.11.1, from `ghcr.io/goekelab/bambu-pipe-bambu:1.0.0`). The installed copy keeps a one-row equivalence class as a list so dplyr 1.2 can join it | `Rscript` in the `braid-lr` environment |
+| Isosceles | Genentech/Isosceles `f8f8c0bb449ca3e55e6ad2c6e5a1b33070c1d387` (0.2.1) | `Rscript` in the `braid-lr` environment |
+
+Resolution order is `BRAID_ISOQUANT`, `BRAID_STRINGTIE`, `BRAID_RSCRIPT`, or `BRAID_SAMTOOLS`, then `~/.local/bin`, then `~/miniforge3/envs/braid-lr/bin`. `Rscript` does not fall back to `PATH`. The other programs do.
+
 Each sample directory contains `count_matrix/gene_counts.csv`, `count_matrix/transcript_counts.csv`, `count_matrix/gene_transcript.tsv`, and `auxiliary/assignments.tsv`. The output directory also contains `annotation.gtf`: the reference records plus novel transcripts. Gene p-values from `scotch-dtu` are Holm-adjusted. Transcript and DTU gene p-values are Benjamini-Hochberg adjusted. A transcript test requires at least 20 cells and 20 total counts in each group.
 
 ## Compatibility and validation
@@ -199,7 +242,12 @@ Each sample directory contains `count_matrix/gene_counts.csv`, `count_matrix/tra
 | Algorithm | Upstream reference |
 | --- | --- |
 | TAMA | Commit `2fa3c308282190c413e9bf0e0b49e63086eef7d4`; collapse date `2023_03_28` |
-| FLAIR combine | Commit `573414c551332bf6348a9d04ba7cf562f67416cb` |
+| FLAIR combine and precise collapse | Commit `573414c551332bf6348a9d04ba7cf562f67416cb` |
+| IsoQuant | Version 4.0.0, commit `7d8268918a770b8d0c6925e8cea99d6c969b4eae` |
+| StringTie | stringtie-rust commit `743b9710b421f4409aaf9ad0fe7543e55dab116b` (StringTie 3.0.3) |
+| Bambu-Clump pipeline | GoekeLab/bambu-singlecell-spatial commit `aa17818929fb1f64029c8c6d46d112c1d2c9488e` |
+| Bambu `bambu.singlecell` | GoekeLab/bambu commit `d704164f0e20c7fe3fe98ba0921e0893cbe3613f` (package 3.11.1) |
+| Isosceles | Commit `f8f8c0bb449ca3e55e6ad2c6e5a1b33070c1d387` (package 0.2.1) |
 | TACO | Version `0.7.3`, commit `eeaeb879b8622365123edbc61ebc100d84194b80` |
 | SCOTCH | Commit `15d6ad8b6319cf806c36f677ffe3ebcc003cae16` |
 
@@ -233,7 +281,7 @@ BRAID_REQUIRE_SAMTOOLS=1 cargo test --workspace --locked
 | `crates/braid-model` | Shared transcript types and algorithm traits |
 | `crates/braid-io` | FASTA/SAM readers, BAM decoding, BED formatting, and path utilities |
 | `crates/braid-tama` | TAMA algorithms and Python 2 compatibility semantics |
-| `crates/braid-flair` | FLAIR combine |
+| `crates/braid-flair` | FLAIR combine and precise collapse |
 | `crates/braid-taco` | TACO assembly and graph algorithms |
 | `crates/braid-scotch` | SCOTCH quantification and differential transcript usage |
 | `tests/parity` | Frozen input/output fixtures and provenance |
