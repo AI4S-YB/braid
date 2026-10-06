@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Differential CLI audit; writes inputs, commands, outputs and JSON evidence.
 
-Build braid first. Pass a local copy of upstream flair_combine.py and its
+Build plena first. Pass a local copy of upstream flair_combine.py and its
 bed_to_gtf.py from the same revision. Their hashes are recorded, not trusted
 as proof of an upstream revision. No production implementation is changed.
 
 Example:
   python3 oracle/evaluate_parity.py --flair-source /tmp/flair_combine.py \
-    --gtf-source /tmp/bed_to_gtf.py --out /tmp/braid-parity-audit
+    --gtf-source /tmp/bed_to_gtf.py --out /tmp/plena-parity-audit
 
 Unused upstream imports are stubbed and fail if called; combine and GTF
 conversion execute the supplied source without rewriting it. For successful
@@ -63,7 +63,7 @@ def bed_row(name, start, end, intron=None, strand="+", chrom="chr1"):
 
 def audit(args):
     repo = Path(__file__).resolve().parents[1]
-    binary = (repo / "target/debug/braid").resolve()
+    binary = (repo / "target/debug/plena").resolve()
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=False)
     source = Path(args.flair_source).resolve()
@@ -86,15 +86,15 @@ def audit(args):
         manifest = case / "manifest.tsv"
         manifest.write_text("\n".join(rows) + "\n")
         codes = {}
-        for label, cmd in (("upstream", oracle), ("braid", [str(binary), "flair-combine"])):
+        for label, cmd in (("upstream", oracle), ("plena", [str(binary), "flair-combine"])):
             directory = case / label
             codes[label] = execute([*cmd, "-m", str(manifest), "-o", str(directory / "combined"), *flags], directory)
         files = {label: {p.name: p.read_bytes() for p in (case / label).glob("combined*")}
                  for label in codes}
-        differences = [name for name in sorted(files["upstream"].keys() | files["braid"].keys())
-                       if files["upstream"].get(name) != files["braid"].get(name)]
+        differences = [name for name in sorted(files["upstream"].keys() | files["plena"].keys())
+                       if files["upstream"].get(name) != files["plena"].get(name)]
         result = {"case": name, "exit_codes": codes, "different_files": differences,
-                  "status": "match" if codes == {"upstream": 0, "braid": 0} and not differences
+                  "status": "match" if codes == {"upstream": 0, "plena": 0} and not differences
                   else "both_failed" if all(codes.values()) else "mismatch"}
         if golden:
             expected = {p.name: p.read_bytes() for p in golden.glob("combined*")}

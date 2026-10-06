@@ -1,0 +1,10 @@
+[package]
+name = "plena-scotch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SCOTCH single-cell full-length isoform quantification"
+
+[dependencies]
+plena-io = { path = "../plena-io" }
+statrs = "0.18"

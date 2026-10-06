@@ -1,0 +1,10 @@
+[package]
+name = "plena-tama"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TAMA collapse and merge, output-compatible with CPython 2.7"
+
+[dependencies]
+plena-model = { path = "../plena-model" }
+plena-io = { path = "../plena-io" }

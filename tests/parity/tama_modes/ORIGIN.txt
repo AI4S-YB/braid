@@ -8,7 +8,7 @@ Golden outputs generated from the local original scripts through the development
 Python 2 semantic adapter (oracle/python2_compat.py); CPython 2 and Docker were
 unavailable. Adapter baseline matched all existing Python 2 gmap data goldens.
 This is source-derived differential evidence, not a fresh native CPython 2 run.
-Production braid runs these algorithms in Rust; only BAM decoding needs samtools.
+Production plena runs these algorithms in Rust; only BAM decoding needs samtools.
 Console output and process exit codes of upstream sys.exit() error paths are not golden.
 Report input and output paths are represented by @SAM@, @FASTA@ and @PREFIX@.
 Regenerate the broader matrix with oracle/evaluate_tama.py, preferably --python2.

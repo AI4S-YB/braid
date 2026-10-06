@@ -1,22 +1,24 @@
-# braid
+# plena
 
-Reconcile transcript models with Rust implementations of **TAMA collapse**, **TAMA merge**, **FLAIR combine**, **FLAIR precise collapse**, **TACO meta-assembly**, and **SCOTCH** isoform quantification. Pooled construction and per-cell quantification also call pinned builds of **IsoQuant**, **Bambu**, **Bambu-Clump**, **Isosceles**, and **StringTie**.
+Build full-length transcriptomes, merge those annotations, and quantify single cells.
 
-The project focuses on reproducing upstream algorithm behavior and output formats. TAMA, FLAIR, TACO, and SCOTCH run natively in Rust. IsoQuant, Bambu, Isosceles, and StringTie stay external programs. Reading BAM files requires `samtools` on `PATH`.
+`plena discover` pools a genome BAM into one transcriptome. `plena merge`, `plena flair-combine`, `plena taco`, and `plena stringtie-merge` combine GTF or BED annotations. `plena quant` counts molecules per cell from a barcode-tagged BAM. Native Rust covers **TAMA collapse**, **TAMA merge**, **FLAIR combine**, **FLAIR precise collapse**, **TACO meta-assembly**, and **SCOTCH**. Pooled construction and per-cell quantification also call pinned builds of **IsoQuant**, **Bambu**, **Bambu-Clump**, **Isosceles**, and **StringTie**.
+
+TAMA, FLAIR, TACO, and SCOTCH run in-process. IsoQuant, Bambu, Isosceles, and StringTie stay external programs. Reading BAM files requires `samtools` on `PATH`.
 
 ## Commands
 
 | Command | Input | Main output |
 | --- | --- | --- |
-| `braid tama-collapse` | Sorted SAM/BAM and genome FASTA | Collapsed BED12 models and read reports |
-| `braid tama-merge` | Manifest of annotated BED12 files | Merged BED12 models and source reports |
-| `braid flair-combine` | Manifest of FLAIR transcriptomes | Combined BED12, counts, and isoform map |
-| `braid taco` | Manifest of sample GTF files | Assembled GTF/BED and diagnostic tracks |
-| `braid scotch` | Reference GTF and one BAM/SAM group per sample | Per-sample gene and transcript counts |
-| `braid scotch-dtu` | Two SCOTCH count directories | Gene Wilcoxon and transcript usage tests |
-| `braid discover` | Coordinate-sorted genome BAM, genome FASTA, optional guide GTF | `transcripts.gtf` for one pooled transcriptome |
-| `braid quant` | Barcode-tagged genome BAM, genome FASTA, and annotation GTF | `counts.tsv` keyed by cell barcode |
-| `braid stringtie-merge` | Two or more transcript GTFs | One merged GTF |
+| `plena tama-collapse` | Sorted SAM/BAM and genome FASTA | Collapsed BED12 models and read reports |
+| `plena tama-merge` | Manifest of annotated BED12 files | Merged BED12 models and source reports |
+| `plena flair-combine` | Manifest of FLAIR transcriptomes | Combined BED12, counts, and isoform map |
+| `plena taco` | Manifest of sample GTF files | Assembled GTF/BED and diagnostic tracks |
+| `plena scotch` | Reference GTF and one BAM/SAM group per sample | Per-sample gene and transcript counts |
+| `plena scotch-dtu` | Two SCOTCH count directories | Gene Wilcoxon and transcript usage tests |
+| `plena discover` | Coordinate-sorted genome BAM, genome FASTA, optional guide GTF | `transcripts.gtf` for one pooled transcriptome |
+| `plena quant` | Barcode-tagged genome BAM, genome FASTA, and annotation GTF | `counts.tsv` keyed by cell barcode |
+| `plena stringtie-merge` | Two or more transcript GTFs | One merged GTF |
 
 The equivalent general commands are `collapse --algo tama`, `merge --algo tama`, and `combine --algo flair`. Those three commands still accept only `tama` or `flair`. StringTie merge is the separate `stringtie-merge` command.
 
@@ -27,24 +29,24 @@ The equivalent general commands are `collapse --algo tama`, `merge --algo tama`,
 CI uses Rust **1.96.1**. Install a Rust toolchain with Cargo, then:
 
 ```sh
-git clone https://github.com/AI4S-YB/braid.git
-cd braid
+git clone https://github.com/AI4S-YB/plena.git
+cd plena
 cargo build --release --locked
-./target/release/braid --help
+./target/release/plena --help
 ```
 
 To install the executable into Cargo's binary directory:
 
 ```sh
-cargo install --path crates/braid-cli --locked
-braid --version
+cargo install --path crates/plena-cli --locked
+plena --version
 ```
 
-The examples below assume `braid` is on `PATH`. Alternatively, use `./target/release/braid` from the repository root.
+The examples below assume `plena` is on `PATH`. Alternatively, use `./target/release/plena` from the repository root.
 
 ### Release binaries
 
-See [GitHub Releases](https://github.com/AI4S-YB/braid/releases). The release workflow builds Linux x86_64 GNU and Windows x86_64 MSVC archives, with SHA-256 checksums. Linux binaries require a compatible glibc environment.
+See [GitHub Releases](https://github.com/AI4S-YB/plena/releases). The release workflow builds Linux x86_64 GNU and Windows x86_64 MSVC archives, with SHA-256 checksums. Linux binaries require a compatible glibc environment.
 
 ## Quick start
 
@@ -52,7 +54,7 @@ Run TAMA collapse on the bundled test data from the repository root:
 
 ```sh
 mkdir -p demo
-braid tama-collapse \
+plena tama-collapse \
   -s tests/parity/gmap_collapse/gmap_test.sam \
   -f tests/parity/gmap_collapse/test_genome.fa \
   -p demo/gmap
@@ -63,10 +65,10 @@ The main annotation is `demo/gmap.bed`. TAMA output prefixes require an existing
 Get the complete option list for any command:
 
 ```sh
-braid tama-collapse --help
-braid tama-merge --help
-braid flair-combine --help
-braid taco --help
+plena tama-collapse --help
+plena tama-merge --help
+plena flair-combine --help
+plena taco --help
 ```
 
 ## TAMA collapse
@@ -75,7 +77,7 @@ Provide alignments sorted by reference and position, together with the matching 
 
 ```sh
 mkdir -p results
-braid tama-collapse \
+plena tama-collapse \
   -s reads.sorted.bam -b BAM \
   -f genome.fa \
   -p results/sample \
@@ -93,7 +95,7 @@ The CLI defaults to SAM input: **use `-b BAM` for BAM files**, regardless of the
 | `-a` / `-m` / `-z` | `10` / `10` / `10` | 5′, splice-junction, and 3′ coordinate thresholds |
 | `-d` | `merge_dup` | Merge duplicate models, or use `no_merge` |
 
-Legacy multi-character options such as `-rm`, `-icm`, `-sj`, and `-vc` are also accepted in place of their double-dash spellings. `braid tama-collapse -v 1` prints the upstream TAMA version date; `braid --version` prints the braid version.
+Legacy multi-character options such as `-rm`, `-icm`, `-sj`, and `-vc` are also accepted in place of their double-dash spellings. `plena tama-collapse -v 1` prints the upstream TAMA version date; `plena --version` prints the plena version.
 
 For prefix `sample`, output files are:
 
@@ -125,7 +127,7 @@ For example, this command writes real tab delimiters:
 ```sh
 printf 'sample1.bed\tcapped\t1,1,1\tS1\nsample2.bed\tno_cap\t2,2,2\tS2\n' > merge.tsv
 mkdir -p results
-braid tama-merge -f merge.tsv -p results/merged -d merge_dup
+plena tama-merge -f merge.tsv -p results/merged -d merge_dup
 ```
 
 The manifest must contain no spaces or blank rows. Each BED12 name must contain `gene_id;transcript_id`, and strand must be `+` or `-`. Priorities are three comma-separated integers used in coordinate voting.
@@ -146,7 +148,7 @@ Use `isoforms` for ordinary transcriptomes and `fusionisoform` for fusion models
 
 ```sh
 printf 'S1\tisoforms\tsample1.bed\nS2\tisoforms\tsample2.bed\n' > flair.tsv
-braid flair-combine -m flair.tsv -o results/combined
+plena flair-combine -m flair.tsv -o results/combined
 ```
 
 Use FLAIR-style transcript/gene names in the BED input. Optional FASTA and read-map files should correspond to those isoforms. To provide a read map without FASTA, leave the fourth column empty. Manifest rows must not be blank.
@@ -167,7 +169,7 @@ Create a headerless manifest containing a GTF path and an optional sample ID, se
 
 ```sh
 printf 'sample1.gtf\tS1\nsample2.gtf\tS2\n' > samples.tsv
-braid taco samples.tsv -o results/taco
+plena taco samples.tsv -o results/taco
 ```
 
 Each sample GTF must contain a `transcript` feature before its `exon` features, with matching `transcript_id` attributes. Sample transcript features need an expression attribute, `FPKM` by default; select another with `--gtf-expr-attr`. Expression is normalized within each sample before filtering. Sample paths and IDs must be unique.
@@ -182,11 +184,11 @@ For all manifests above, relative input paths are resolved against the **current
 
 ## SCOTCH quantification
 
-`braid scotch` assigns each cell UMI in a full-length long-read BAM or SAM to a known or novel isoform of a gene in the reference GTF.
+`plena scotch` assigns each cell UMI in a full-length long-read BAM or SAM to a known or novel isoform of a gene in the reference GTF.
 
 ```sh
-braid scotch --bam sample.bam --gtf genes.gtf --out scotch_out
-braid scotch-dtu --a scotch_out/sampleA --b scotch_out/sampleB --out dtu.tsv
+plena scotch --bam sample.bam --gtf genes.gtf --out scotch_out
+plena scotch-dtu --a scotch_out/sampleA --b scotch_out/sampleB --out dtu.tsv
 ```
 
 Repeat `--bam` for more than one sample. A path may be a file or a directory of `*.bam` and `*.sam` files; a directory is one sample. Samples share the annotation and discover novel isoforms together. Counts are written per sample.
@@ -197,7 +199,7 @@ A read that matches no annotated isoform can seed a novel isoform. SCOTCH keeps 
 
 ## Pooled discovery
 
-`braid discover` pools every cell in one coordinate-sorted genome BAM and writes `transcripts.gtf` plus `command.log`. `--algo` is `tama`, `flair`, `isoquant`, `bambu`, or `stringtie`. `--genome` is the FASTA that matches the BAM. `--gtf` is optional for TAMA, FLAIR, and StringTie, and required for IsoQuant and Bambu. `--threads` defaults to 1.
+`plena discover` pools every cell in one coordinate-sorted genome BAM and writes `transcripts.gtf` plus `command.log`. `--algo` is `tama`, `flair`, `isoquant`, `bambu`, or `stringtie`. `--genome` is the FASTA that matches the BAM. `--gtf` is optional for TAMA, FLAIR, and StringTie, and required for IsoQuant and Bambu. `--threads` defaults to 1.
 
 `flair` is the native precise-collapse step (`collapse_isoforms_precise.py` behavior): alignments become BED12, then isoforms. It does not run minimap2. `tama` uses the existing collapse defaults and converts the BED12 models to GTF. `stringtie` runs long-read assembly (`stringtie -L`). IsoQuant discovery is the bulk transcript-discovery run. Bambu discovery calls `bambu()` with discovery on and quantification off.
 
@@ -205,7 +207,7 @@ Tool-specific files remain under `<out>/raw/`.
 
 ## Per-cell quantification
 
-`braid quant` reads a genome BAM that already has cell-barcode and UMI tags, plus an annotation GTF, and writes `counts.tsv`:
+`plena quant` reads a genome BAM that already has cell-barcode and UMI tags, plus an annotation GTF, and writes `counts.tsv`:
 
 ```text
 barcode    transcript_id    count
@@ -218,22 +220,22 @@ barcode    transcript_id    count
 ## StringTie merge
 
 ```sh
-braid stringtie-merge -o merged.gtf sample1.gtf sample2.gtf
+plena stringtie-merge -o merged.gtf sample1.gtf sample2.gtf
 ```
 
-An optional `-G guide.gtf` is passed through to `stringtie --merge`. `braid merge --algo` still accepts only `tama`.
+An optional `-G guide.gtf` is passed through to `stringtie --merge`. `plena merge --algo` still accepts only `tama`.
 
 ## Pinned external programs
 
-| Tool | Pin | How braid runs it |
+| Tool | Pin | How plena runs it |
 | --- | --- | --- |
 | FLAIR precise collapse | BrooksLabUCSC/flair `573414c551332bf6348a9d04ba7cf562f67416cb` | In-process Rust, checked against `tests/parity/flair_collapse` |
 | IsoQuant | v4.0.0, commit `7d8268918a770b8d0c6925e8cea99d6c969b4eae` (GPL-2.0-only) | `isoquant` subprocess. Sources are not in this tree |
 | StringTie | AI4S-YB/stringtie-rust `743b9710b421f4409aaf9ad0fe7543e55dab116b` (StringTie 3.0.3, MIT) | `stringtie` subprocess |
-| Bambu / Bambu-Clump | Pipeline GoekeLab/bambu-singlecell-spatial `aa17818929fb1f64029c8c6d46d112c1d2c9488e`. `bambu.singlecell` is GoekeLab/bambu `d704164f0e20c7fe3fe98ba0921e0893cbe3613f` (package 3.11.1, from `ghcr.io/goekelab/bambu-pipe-bambu:1.0.0`). The installed copy keeps a one-row equivalence class as a list so dplyr 1.2 can join it | `Rscript` in the `braid-lr` environment |
-| Isosceles | Genentech/Isosceles `f8f8c0bb449ca3e55e6ad2c6e5a1b33070c1d387` (0.2.1) | `Rscript` in the `braid-lr` environment |
+| Bambu / Bambu-Clump | Pipeline GoekeLab/bambu-singlecell-spatial `aa17818929fb1f64029c8c6d46d112c1d2c9488e`. `bambu.singlecell` is GoekeLab/bambu `d704164f0e20c7fe3fe98ba0921e0893cbe3613f` (package 3.11.1, from `ghcr.io/goekelab/bambu-pipe-bambu:1.0.0`). The installed copy keeps a one-row equivalence class as a list so dplyr 1.2 can join it | `Rscript` in the `plena-lr` environment |
+| Isosceles | Genentech/Isosceles `f8f8c0bb449ca3e55e6ad2c6e5a1b33070c1d387` (0.2.1) | `Rscript` in the `plena-lr` environment |
 
-Resolution order is `BRAID_ISOQUANT`, `BRAID_STRINGTIE`, `BRAID_RSCRIPT`, or `BRAID_SAMTOOLS`, then `~/.local/bin`, then `~/miniforge3/envs/braid-lr/bin`. `Rscript` does not fall back to `PATH`. The other programs do.
+Resolution order is `PLENA_ISOQUANT`, `PLENA_STRINGTIE`, `PLENA_RSCRIPT`, or `PLENA_SAMTOOLS`, then `~/.local/bin`, then `~/miniforge3/envs/plena-lr/bin`. `Rscript` does not fall back to `PATH`. The other programs do.
 
 Each sample directory contains `count_matrix/gene_counts.csv`, `count_matrix/transcript_counts.csv`, `count_matrix/gene_transcript.tsv`, and `auxiliary/assignments.tsv`. The output directory also contains `annotation.gtf`: the reference records plus novel transcripts. Gene p-values from `scotch-dtu` are Holm-adjusted. Transcript and DTU gene p-values are Benjamini-Hochberg adjusted. A transcript test requires at least 20 cells and 20 total counts in each group.
 
@@ -272,18 +274,18 @@ cargo test --workspace --locked
 BAM integration tests skip when `samtools` is unavailable. To require them, as CI does:
 
 ```sh
-BRAID_REQUIRE_SAMTOOLS=1 cargo test --workspace --locked
+PLENA_REQUIRE_SAMTOOLS=1 cargo test --workspace --locked
 ```
 
 | Directory | Responsibility |
 | --- | --- |
-| `crates/braid-cli` | CLI parsing and command dispatch |
-| `crates/braid-model` | Shared transcript types and algorithm traits |
-| `crates/braid-io` | FASTA/SAM readers, BAM decoding, BED formatting, and path utilities |
-| `crates/braid-tama` | TAMA algorithms and Python 2 compatibility semantics |
-| `crates/braid-flair` | FLAIR combine and precise collapse |
-| `crates/braid-taco` | TACO assembly and graph algorithms |
-| `crates/braid-scotch` | SCOTCH quantification and differential transcript usage |
+| `crates/plena-cli` | CLI parsing and command dispatch |
+| `crates/plena-model` | Shared transcript types and algorithm traits |
+| `crates/plena-io` | FASTA/SAM readers, BAM decoding, BED formatting, and path utilities |
+| `crates/plena-tama` | TAMA algorithms and Python 2 compatibility semantics |
+| `crates/plena-flair` | FLAIR combine and precise collapse |
+| `crates/plena-taco` | TACO assembly and graph algorithms |
+| `crates/plena-scotch` | SCOTCH quantification and differential transcript usage |
 | `tests/parity` | Frozen input/output fixtures and provenance |
 | `oracle` | Development scripts for upstream comparisons |
 

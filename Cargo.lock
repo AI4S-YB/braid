@@ -68,57 +68,57 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
-name = "braid-cli"
+name = "plena-cli"
 version = "0.2.0"
 dependencies = [
- "braid-flair",
- "braid-model",
- "braid-scotch",
- "braid-taco",
- "braid-tama",
+ "plena-flair",
+ "plena-model",
+ "plena-scotch",
+ "plena-taco",
+ "plena-tama",
  "clap",
 ]
 
 [[package]]
-name = "braid-flair"
+name = "plena-flair"
 version = "0.2.0"
 dependencies = [
- "braid-io",
+ "plena-io",
 ]
 
 [[package]]
-name = "braid-io"
+name = "plena-io"
 version = "0.2.0"
 dependencies = [
- "braid-model",
+ "plena-model",
 ]
 
 [[package]]
-name = "braid-model"
+name = "plena-model"
 version = "0.2.0"
 
 [[package]]
-name = "braid-scotch"
+name = "plena-scotch"
 version = "0.2.0"
 dependencies = [
- "braid-io",
+ "plena-io",
  "statrs",
 ]
 
 [[package]]
-name = "braid-taco"
+name = "plena-taco"
 version = "0.2.0"
 dependencies = [
- "braid-io",
- "braid-model",
+ "plena-io",
+ "plena-model",
 ]
 
 [[package]]
-name = "braid-tama"
+name = "plena-tama"
 version = "0.2.0"
 dependencies = [
- "braid-io",
- "braid-model",
+ "plena-io",
+ "plena-model",
 ]
 
 [[package]]

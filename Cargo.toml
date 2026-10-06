@@ -1,18 +1,18 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/braid-model",
-    "crates/braid-io",
-    "crates/braid-tama",
-    "crates/braid-flair",
-    "crates/braid-taco",
-    "crates/braid-scotch",
-    "crates/braid-cli",
+    "crates/plena-model",
+    "crates/plena-io",
+    "crates/plena-tama",
+    "crates/plena-flair",
+    "crates/plena-taco",
+    "crates/plena-scotch",
+    "crates/plena-cli",
 ]
 
 [workspace.package]
 version = "0.2.0"
 edition = "2021"
 license = "GPL-3.0-only"
-authors = ["braid contributors"]
-description = "Reconcile transcript models with pluggable algorithms"
+authors = ["plena contributors"]
+description = "Full-length transcriptome construction, GTF merge, and single-cell quantification"

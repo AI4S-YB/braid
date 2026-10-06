@@ -13,7 +13,7 @@ root = Path(options.out).resolve()
 root.mkdir(parents=True, exist_ok=False)
 rng = random.Random(20261004)
 results = []
-metadata = {'oracle': options.python2 or 'python2_compat.py (fallback)', 'sha256': {kind: hashlib.sha256((options.upstream / ('tama_' + kind + '.py')).read_bytes()).hexdigest() for kind in ['merge', 'collapse']}, 'binary_sha256': hashlib.sha256((repo / 'target/debug/braid').read_bytes()).hexdigest(), 'seed': 20261004}
+metadata = {'oracle': options.python2 or 'python2_compat.py (fallback)', 'sha256': {kind: hashlib.sha256((options.upstream / ('tama_' + kind + '.py')).read_bytes()).hexdigest() for kind in ['merge', 'collapse']}, 'binary_sha256': hashlib.sha256((repo / 'target/debug/plena').read_bytes()).hexdigest(), 'seed': 20261004}
 (root / 'metadata.json').write_text(json.dumps(metadata, indent=2))
 
 def compare(name, kind, args):
@@ -24,7 +24,7 @@ def compare(name, kind, args):
         out = d / side
         out.mkdir(exist_ok=True)
         oracle = [options.python2] if options.python2 else [sys.executable, str(repo / 'oracle/python2_compat.py')]
-        cmd = oracle + [str(options.upstream / ('tama_' + kind + '.py'))] if side == 'py' else [str(repo / 'target/debug/braid'), 'tama-' + kind]
+        cmd = oracle + [str(options.upstream / ('tama_' + kind + '.py'))] if side == 'py' else [str(repo / 'target/debug/plena'), 'tama-' + kind]
         cmd += args + ['-p', str(out / 'out')]
         (out / 'command.json').write_text(json.dumps(cmd))
         try:

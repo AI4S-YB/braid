@@ -34,7 +34,7 @@ jobs:
           sudo apt-get install -y samtools
       - name: Test
         env:
-          BRAID_REQUIRE_SAMTOOLS: "1"
+          PLENA_REQUIRE_SAMTOOLS: "1"
         run: cargo test --workspace --locked
 
   build:
@@ -47,11 +47,11 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            binary: braid
+            binary: plena
             archive: tar.gz
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            binary: braid.exe
+            binary: plena.exe
             archive: zip
     steps:
       - uses: actions/checkout@v4
@@ -63,7 +63,7 @@ jobs:
         with:
           key: ${{ matrix.target }}
       - name: Build
-        run: cargo build --release --locked --bin braid --target ${{ matrix.target }}
+        run: cargo build --release --locked --bin plena --target ${{ matrix.target }}
       - name: Package
         shell: bash
         env:
@@ -79,7 +79,7 @@ jobs:
           else
             version="ci-${GITHUB_SHA:0:7}"
           fi
-          name="braid-${version}-${TARGET}"
+          name="plena-${version}-${TARGET}"
           mkdir -p dist
           if [[ "${ARCHIVE}" == "zip" ]]; then
             tar -a -cf "dist/${name}.zip" -C "target/${TARGET}/release" "${BINARY}"
@@ -89,7 +89,7 @@ jobs:
           ls -l dist
       - uses: actions/upload-artifact@v4
         with:
-          name: braid-${{ matrix.target }}
+          name: plena-${{ matrix.target }}
           path: dist/*
           if-no-files-found: error
 
@@ -103,7 +103,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: braid-*
+          pattern: plena-*
           path: dist
           merge-multiple: true
       - name: Checksums and publish
@@ -119,8 +119,8 @@ jobs:
 
           预编译二进制：
 
-          - Linux x86_64（glibc）：\`braid-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz\`，解压后是 \`braid\`
-          - Windows x86_64（MSVC）：\`braid-${GITHUB_REF_NAME}-x86_64-pc-windows-msvc.zip\`，解压后是 \`braid.exe\`
+          - Linux x86_64（glibc）：\`plena-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz\`，解压后是 \`plena\`
+          - Windows x86_64（MSVC）：\`plena-${GITHUB_REF_NAME}-x86_64-pc-windows-msvc.zip\`，解压后是 \`plena.exe\`
 
           本版包含 TAMA collapse、TAMA merge、FLAIR combine 和 TACO meta-assembly。许可证 GPL-3.0-only。
 

@@ -1,0 +1,18 @@
+[package]
+name = "plena-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "plena command line"
+
+[[bin]]
+name = "plena"
+path = "src/main.rs"
+
+[dependencies]
+plena-model = { path = "../plena-model" }
+plena-tama = { path = "../plena-tama" }
+plena-flair = { path = "../plena-flair" }
+plena-taco = { path = "../plena-taco" }
+plena-scotch = { path = "../plena-scotch" }
+clap = { version = "4", features = ["derive"] }

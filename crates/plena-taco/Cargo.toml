@@ -1,0 +1,10 @@
+[package]
+name = "plena-taco"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TACO meta-assembly, matched to tacorna/taco 0.7.3"
+
+[dependencies]
+plena-io = { path = "../plena-io" }
+plena-model = { path = "../plena-model" }
